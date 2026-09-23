@@ -10,10 +10,13 @@ from .errors import register_error_handlers
 from .models import AppRole, DepartmentCreate, EmployeeCreate, HealthResponse, MeResponse, Principal, RoleCreate
 from .security import current_principal, require_roles
 from .supabase import SupabaseGateway, get_gateway
+from .documents import router as documents_router
+from .upload_limit import UploadRequestLimit
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 
 app = FastAPI(title="SkillSprint AI API", version="0.1.0")
+app.add_middleware(UploadRequestLimit)
 settings = get_settings()
 
 
@@ -40,6 +43,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 register_error_handlers(app)
+app.include_router(documents_router)
 
 
 @app.get("/api/v1/health", response_model=HealthResponse)

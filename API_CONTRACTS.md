@@ -1,6 +1,6 @@
 # REST API Contracts
 
-Status: **PLANNED - routes not implemented**. The MVP serves one fictional organization. Base path `/api/v1`; JSON UTF-8; UUID identifiers; ISO-8601 UTC times. Authentication uses Supabase bearer JWT verified by FastAPI. RBAC/RLS apply within the single organization; no tenant identifier is accepted or derived. Errors use `application/problem+json` with `type`, `title`, `status`, `code`, `detail`, `instance`, `correlation_id`, and field errors. List endpoints support cursor pagination, bounded `limit`, sort, and domain filters.
+Status: **Phase 0 target contracts; Phase 1 and the Phase 2 document subset are implemented as noted below, while later routes remain planned**. The MVP serves one fictional organization. Base path `/api/v1`; JSON UTF-8; UUID identifiers; ISO-8601 UTC times. Authentication uses Supabase bearer JWT verified by FastAPI. RBAC/RLS apply within the single organization; no tenant identifier is accepted or derived. Errors use `application/problem+json` with `type`, `title`, `status`, `code`, `detail`, `instance`, `correlation_id`, and field errors. Later-phase list endpoints target cursor pagination, bounded `limit`, sort, and domain filters; the implemented Phase 2 list uses a bounded initial result with client-side search/filter.
 
 Role abbreviations: A=Admin, TM=Training Manager, R=Reviewer, M=Manager, E=Employee.
 
@@ -20,14 +20,22 @@ Role abbreviations: A=Admin, TM=Training Manager, R=Reviewer, M=Manager, E=Emplo
 
 | Method/path | Roles | Request -> response | Major validation / errors |
 |---|---|---|---|
-| `POST /documents/uploads` | A,TM | multipart file + title/category/department/version/effective/expiry -> `202` draft version + job ID | PDF/DOCX signature; configurable initial limit 15 MB; duplicate hash/date order; scanned or unextractable PDF -> NEEDS_REVIEW; 413/415/409/422 |
-| `GET /documents` | A,TM,R | filters/search -> page | access scope; 400 invalid filter |
+| `POST /documents/uploads` | A,TM | multipart file + code/title/category/optional department/version/effective/expiry -> `202` draft version + final synchronous processing result in Phase 2 | PDF/DOCX signature; configurable initial limit 15 MB; duplicate hash/date order; scanned or unextractable PDF -> NEEDS_REVIEW; 413/415/409/422 |
+| `GET /documents` | A,TM,R | `offset`, `limit<=100` -> `{items,offset,limit,has_more}`; UI search/filter is page-local in Phase 2 | access scope; invalid page 422 |
 | `GET /documents/{id}` | A,TM,R | - -> logical doc + versions | 404/403 |
-| `GET /document-versions/{id}/chunks` | A,TM,R | locator/search -> page with metadata | approved/review permission; 403/404 |
+| `GET /documents/{id}/current-effective-version` | A,TM,R | optional `on_date` -> approved, parsed, date-effective version or null | reusable database rule, not latest-created |
+| `GET /document-versions/{id}` | A,TM,R | - -> version metadata and processing status | 404/403 |
+| `GET /document-versions/{id}/original` | A,TM,R | - -> private original attachment via user-scoped Storage | 404/403 |
+| `GET /document-versions/{id}/chunks` | A,TM,R | `offset`, `limit<=100` -> `{items,offset,limit,has_more}` traceable chunks | review permission; 403/422 |
+| `POST /document-versions/{id}/retry` | uploader A/TM | optional original file -> `202` processing result | only stranded UPLOADED/PROCESSING draft; stored/replaced bytes must match reserved SHA-256 and size |
 | `POST /document-versions/{id}/submit` | TM,A | comment, expected status -> submitted version | draft complete; records creator/submitter; 409/422 |
-| `POST /document-versions/{id}/approve` | R,A | comment, expected status; Admin emergency override reason when applicable -> approved version | processing complete, extractable without OCR, metadata/security findings resolved; TM self-approval forbidden; creator and approver recorded; 403/409/422 |
-| `POST /document-versions/{id}/reject` | R,A | required reason -> rejected | valid transition; creator/decider audited; 403/409/422 |
+| `POST /document-versions/{id}/approve` | R,A | `reason`, `admin_override` (explicit Admin self-review only) -> approved version | successful parse; uploader/submitter cannot review own version unless Admin override with reason; creator and approver audited; 403/409/422 |
+| `POST /document-versions/{id}/reject` | R,A | required `reason`, `admin_override` if Admin self-review -> rejected | same actor-identity separation; 403/409/422 |
 | `GET /jobs/{id}` | initiating roles | - -> state, progress, safe error | 403/404 |
+
+Phase 2 implements synchronous Python parsing inside the upload request, so the `202` response carries `document_id`, `version_id`, `parse_status`, `review_status`, `chunk_count`, and a safe `reason_code`; it does **not** claim a durable job ID. The planned `/jobs/{id}` route is not implemented in Phase 2. All Phase 2 document routes use the `/api/v1` base path.
+
+The upload body has a bounded gateway/API request envelope in addition to the Python file-size check. Authoring RPCs use the user's JWT; only the backend infrastructure adapter may invoke the service-role-only processing finalization RPC. The service credential never appears in browser code or API output.
 
 ## Requirements and RRM
 

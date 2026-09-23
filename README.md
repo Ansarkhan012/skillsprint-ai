@@ -1,12 +1,15 @@
 # SkillSprint AI
 
-Phase 1 foundation: Next.js web app, FastAPI/Python API, and Supabase PostgreSQL/Auth/RLS infrastructure. Supabase is the selected implementation, not an explicit SRS requirement. Later document and GenAI features remain in the architecture documents.
+Phase 1 foundation: Next.js web app, FastAPI/Python API, and Supabase PostgreSQL/Auth/RLS infrastructure. Supabase is the selected implementation, not an explicit SRS requirement. Later RRM, GenAI, and onboarding features remain in the architecture documents.
+
+Phase 2 document intelligence is locked after project-owner closeout. Its migration has been applied to the live project. See [Phase 2 implementation and verification notes](docs/PHASE2_DOCUMENT_INTELLIGENCE.md); detailed direct RLS/Storage attack checks remain pending.
 
 ## Prerequisites
 
 - Node.js 20 or later and npm
 - Python 3.12
 - Supabase project with Auth and PostgreSQL
+- Phase 2 backend parser dependencies from `services/api/requirements.txt` (PyMuPDF, python-docx, python-multipart)
 
 ## Configuration
 
@@ -67,3 +70,9 @@ npm run build
 8. Set a profile to `INACTIVE` and confirm API access is denied even while the Supabase session remains valid.
 
 The project owner reports that the migration was applied and all five role logins and dashboards were manually verified. The detailed live row-level RLS checks in `docs/PHASE1_RBAC_RLS_VERIFICATION.md` remain a separate manual verification procedure; login success does not itself prove every RLS policy.
+
+## Phase 2 document intelligence (locked)
+
+The Documents workspace accepts PDF and DOCX originals through FastAPI. Python validates file signatures, hashes actual bytes, extracts source-located text, and chunks it deterministically. The initial upload limit is 15 MB (`MAX_UPLOAD_BYTES`); set it consistently on FastAPI and the Next.js server. Phase 2 processing finalization requires a backend-only `SUPABASE_SERVICE_ROLE_KEY`; authoring and review remain user-JWT scoped. Never place that credential in `NEXT_PUBLIC_*` or the browser. OCR and embeddings are not used. Scanned/unextractable PDFs become `NEEDS_REVIEW`, not invented text. Only Admin/Training Manager can upload or submit; Reviewer/Admin can review, but cannot review their own version without explicit Admin override and a reason. Current-effective ground truth requires an approved, parsed, date-effective version, not merely the latest upload. Supabase is the infrastructure boundary for private Storage and PostgreSQL/RLS; parsing and chunking are portable Python logic.
+
+Do **not** reapply `supabase/migrations/202609230002_document_intelligence.sql` automatically. The project owner applied it manually. Direct live RLS/Storage attack verification remains separately documented and pending. Phase 1's applied migration remains unchanged.
