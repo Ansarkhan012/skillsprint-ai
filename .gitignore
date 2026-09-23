@@ -1,0 +1,11 @@
+.env
+.env.local
+.env.*
+!.env.example
+.venv/
+__pycache__/
+node_modules/
+.next/
+
+# Local tooling and generated scratch artifacts
+tmp/
