@@ -1,7 +1,9 @@
 import logging
+from contextlib import asynccontextmanager
 from time import perf_counter
 from uuid import uuid4
 
+import httpx
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,11 +13,20 @@ from .models import AppRole, DepartmentCreate, EmployeeCreate, HealthResponse, M
 from .security import current_principal, require_roles
 from .supabase import SupabaseGateway, get_gateway
 from .documents import router as documents_router
+from .rrm import router as rrm_router
 from .upload_limit import UploadRequestLimit
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 
-app = FastAPI(title="SkillSprint AI API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    # The pool has no default user Authorization header. Every request supplies its own JWT.
+    async with httpx.AsyncClient(limits=httpx.Limits(max_connections=50, max_keepalive_connections=20)) as client:
+        application.state.supabase_http = client
+        yield
+
+
+app = FastAPI(title="SkillSprint AI API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(UploadRequestLimit)
 settings = get_settings()
 
@@ -39,11 +50,12 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.web_origin],
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["Authorization", "Content-Type"],
 )
 register_error_handlers(app)
 app.include_router(documents_router)
+app.include_router(rrm_router)
 
 
 @app.get("/api/v1/health", response_model=HealthResponse)

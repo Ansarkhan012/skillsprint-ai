@@ -1,6 +1,6 @@
 # SkillSprint AI Delivery Plan
 
-Status: **PLANNED**. Acceptance criteria are gates, not claims of completion. With approximately three days, phases overlap and must be executed as vertical slices.
+Status: **Delivery plan with historical scheduling notes.** Phases 0-2 are locked; Phase 3 is a complete/locked candidate pending its commit. Phases 4-8 remain planned. Acceptance criteria are gates, not claims of completion.
 
 ## Phase 1 - Foundation
 
@@ -20,11 +20,11 @@ Status: **PLANNED**. Acceptance criteria are gates, not claims of completion. Wi
 
 ## Phase 3 - Role Requirement Matrix / Ground Truth
 
-**Scope:** departments/roles, requirement candidates and approval, sources, RRM revisions, applicability, precedence, prerequisites, minimum fictional dataset.  
+**Scope:** departments/roles, requirement candidates and approval, sources, RRM revisions, applicability, precedence, prerequisites. The minimum fictional competition dataset inventory was explicitly deferred to Phase 7 by the project owner at Phase 3 closeout.
 **Dependencies:** Phase 2 source lineage and Phase 1 RBAC.  
 **Acceptance criteria:** add a new role/configuration without code; Training Manager drafts/submits while Reviewer/Admin approves/rejects; creator and approver are recorded; approved RRM freezes source snapshot; only approved/current-effective sources enter active ground truth; approved role exceptions can outrank general policy; unresolved conflicts route to MANUAL_REVIEW.  
-**Tests:** source integrity, revision immutability, self-approval denial, Admin emergency-override reason/audit, applicability, prerequisite cycles, precedence, count/inventory checks.  
-**Risks:** creating >=150 sourced requirements is labor-intensive and is the largest content blocker.
+**Tests:** source integrity, revision immutability, self-approval denial, Admin emergency-override reason/audit, applicability, prerequisite cycles and precedence. Count/inventory checks and expanded live database attack verification are Phase 7 gates.
+**Risks:** creating >=150 sourced requirements is labor-intensive; this content obligation remains open for Phase 7.
 
 ## Phase 4 - GenAI Engine
 
@@ -52,7 +52,7 @@ Status: **PLANNED**. Acceptance criteria are gates, not claims of completion. Wi
 
 ## Phase 7 - Hidden Evaluation / QA
 
-**Scope:** unseen pack harness, minimum dataset/adversarial/version cases, 10-role plans, >=100 comparisons, performance/security/boundary testing, timed live-change drills.  
+**Scope:** unseen pack harness, minimum competition dataset inventory, adversarial/version cases, expanded live database/RPC/RLS attack verification, 10-role plans, >=100 comparisons, performance/security/boundary testing, timed live-change drills.
 **Dependencies:** complete vertical slice and representative dataset.  
 **Acceptance criteria:** hidden PDF/DOCX/new role/revised policy/outdated SOP/conflicting FAQ/missing requirement/ambiguous clause/exception/injection/unsupported content handled without core change; standard run measured against 30-second target.  
 **Tests:** all SRS test categories, seeded load (1k employees/100 roles/1k docs where practical), unauthorized access, invalid provider response, consistency runs, deliberate defects.  
@@ -105,4 +105,4 @@ After the vertical slice is stable, expand to 10 roles and submission minimums. 
 - **Dataset requirements:** minimum counts listed in `SRS_MATRIX.md` require immediate human content ownership and source review.
 - **Submission requirements:** public repository, deployment, report, comparison/validation/security evidence, MP4, >=2,000-word blog, instructions, links, and team/AI declarations need named owners.
 
-Following the requested architecture corrections, Phase 0 is **READY_FOR_FINAL_REVIEW**, not locked. Final human approval remains required before implementation begins.
+Historical Phase 0 note: following the architecture corrections, Phase 0 was **READY_FOR_FINAL_REVIEW** at that time. The project owner subsequently approved and locked Phases 0-2 and accepted Phase 3 as a complete/locked candidate.

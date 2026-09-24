@@ -1,31 +1,45 @@
-from functools import lru_cache
 from uuid import UUID
+import logging
 
 import httpx
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from pydantic import ValidationError
 
 from .config import get_settings
 from .models import AppRole, Profile
 
 
+logger = logging.getLogger("skillsprint.supabase")
+
+
 class SupabaseGateway:
-    def __init__(self, url: str, anon_key: str) -> None:
+    def __init__(self, url: str, anon_key: str, client: httpx.AsyncClient | None = None) -> None:
         self.url = url.rstrip("/")
         self.anon_key = anon_key
+        self.client = client
+
+    def http(self) -> httpx.AsyncClient:
+        if self.client is None:
+            raise RuntimeError("Supabase HTTP client is not initialized")
+        return self.client
 
     async def request(self, token: str, table: str, params: dict[str, str]) -> list[dict]:
         headers = {"apikey": self.anon_key, "Authorization": f"Bearer {token}"}
+        response: httpx.Response | None = None
         try:
-            async with httpx.AsyncClient(timeout=8) as client:
-                response = await client.get(
-                    f"{self.url}/rest/v1/{table}", headers=headers, params=params
-                )
-                if response.status_code in (401, 403):
-                    raise HTTPException(status_code=403, detail="DATA_ACCESS_DENIED")
-                response.raise_for_status()
-                return response.json()
+            response = await self.http().get(
+                f"{self.url}/rest/v1/{table}", headers=headers, params=params, timeout=8
+            )
+            if response.status_code in (401, 403):
+                raise HTTPException(status_code=403, detail="DATA_ACCESS_DENIED")
+            response.raise_for_status()
+            return response.json()
         except (httpx.HTTPError, ValueError) as exc:
+            logger.warning(
+                "read failed table=%s exception_type=%s upstream_status=%s response_received=%s client_closed=%s",
+                table, type(exc).__name__, response.status_code if response is not None else None,
+                response is not None, self.client.is_closed if self.client is not None else None,
+            )
             raise HTTPException(status_code=503, detail="DATA_SERVICE_UNAVAILABLE") from exc
 
     async def get_profile(self, token: str, user_id: UUID) -> Profile | None:
@@ -53,10 +67,9 @@ class SupabaseGateway:
             "Prefer": "return=representation",
         }
         try:
-            async with httpx.AsyncClient(timeout=8) as client:
-                response = await client.post(
-                    f"{self.url}/rest/v1/{table}", headers=headers, json=payload
-                )
+            response = await self.http().post(
+                f"{self.url}/rest/v1/{table}", headers=headers, json=payload, timeout=8
+            )
             if response.status_code == 409:
                 raise HTTPException(status_code=409, detail="RECORD_CONFLICT")
             if response.status_code in (400, 422):
@@ -70,7 +83,7 @@ class SupabaseGateway:
             raise HTTPException(status_code=503, detail="DATA_SERVICE_UNAVAILABLE") from exc
 
 
-@lru_cache
-def get_gateway() -> SupabaseGateway:
+def get_gateway(request: Request) -> SupabaseGateway:
     settings = get_settings()
-    return SupabaseGateway(str(settings.supabase_url), settings.supabase_anon_key)
+    return SupabaseGateway(str(settings.supabase_url), settings.supabase_anon_key,
+                           request.app.state.supabase_http)

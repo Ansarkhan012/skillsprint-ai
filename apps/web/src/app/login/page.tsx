@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { BookOpenCheck, Eye, EyeOff, LockKeyhole, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,12 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setHydrated(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -41,11 +47,11 @@ export default function LoginPage() {
     <div className="flex items-center justify-center bg-background px-5 py-12 sm:px-10"><div className="w-full max-w-md rounded-md border border-border bg-card p-7 shadow-panel sm:p-10">
       <div className="flex size-11 items-center justify-center rounded-md bg-secondary text-primary"><LockKeyhole size={22} aria-hidden="true" /></div>
       <h2 className="mt-6 text-2xl font-bold tracking-tight">Welcome back</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">Sign in to your SkillSprint workspace.</p>
-      <form onSubmit={submit} className="mt-8 space-y-5" noValidate>
-        <div><label htmlFor="email" className="mb-2 block text-sm font-semibold">Email address</label><Input id="email" name="email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.com" required aria-invalid={!!error && !email} /></div>
-        <div><label htmlFor="password" className="mb-2 block text-sm font-semibold">Password</label><div className="relative"><Input id="password" name="password" type={showPassword ? "text" : "password"} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className="pr-12" required aria-invalid={!!error && !password} /><button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-md text-muted-foreground hover:text-foreground" aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></div>
+      <form onSubmit={submit} method="post" action="/login" className="mt-8 space-y-5" noValidate>
+        <div><label htmlFor="email" className="mb-2 block text-sm font-semibold">Email address</label><Input id="email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.com" required aria-invalid={!!error && !email} /></div>
+        <div><label htmlFor="password" className="mb-2 block text-sm font-semibold">Password</label><div className="relative"><Input id="password" type={showPassword ? "text" : "password"} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className="pr-12" required aria-invalid={!!error && !password} /><button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-md text-muted-foreground hover:text-foreground" aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></div>
         {error && <p role="alert" className="rounded-md border border-destructive/25 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
-        <Button type="submit" className="w-full" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</Button>
+        <Button type="submit" className="w-full" disabled={!hydrated || busy}>{busy ? "Signing in…" : "Sign in"}</Button>
       </form>
       <p className="mt-8 flex items-center gap-2 border-t border-border pt-5 text-xs text-muted-foreground"><ShieldCheck size={15} aria-hidden="true" /> For authorized team members only.</p>
     </div></div>

@@ -5,17 +5,24 @@ import { apiBaseUrl } from "@/lib/env";
 const uuid = "[0-9a-fA-F-]{36}";
 const allowedGet = new RegExp(`^(documents|documents/${uuid}|documents/${uuid}/current-effective-version|document-versions/${uuid}|document-versions/${uuid}/(chunks|original))$`);
 const allowedPost = new RegExp(`^(documents/uploads|document-versions/${uuid}/(submit|approve|reject|retry))$`);
+const rrmGet = new RegExp(`^(requirements|requirements/${uuid}|rrm/evidence|rrm/evidence/${uuid}/chunks|rrm/configs|roles/${uuid}/matrices|roles/${uuid}/ground-truth|matrices/${uuid})$`);
+const rrmPost = new RegExp(`^(requirements|rrm/configs|roles/${uuid}/matrices|matrices/${uuid}/(submit|approve|reject|issues)|issues/${uuid}/resolve)$`);
+const rrmPatch = new RegExp(`^matrices/${uuid}$`);
+const rrmRequestLimit = 512 * 1024;
 const configuredFileLimit = Number(process.env.MAX_UPLOAD_BYTES ?? 15728640);
 const fileLimit = Number.isSafeInteger(configuredFileLimit) && configuredFileLimit > 0
   ? Math.min(configuredFileLimit, 100 * 1024 * 1024) : 15728640;
 const requestLimit = fileLimit + 1024 * 1024;
 
-async function forward(request: NextRequest, segments: string[], method: "GET" | "POST") {
+async function forward(request: NextRequest, segments: string[], method: "GET" | "POST" | "PATCH") {
   const path = segments.join("/");
-  if (!(method === "GET" ? allowedGet : allowedPost).test(path)) {
+  const isRrm = (method === "GET" ? rrmGet : method === "POST" ? rrmPost : rrmPatch).test(path);
+  const isFoundationPost = method === "POST" && /^(departments|roles)$/.test(path);
+  const isDocument = method === "GET" ? allowedGet.test(path) : method === "POST" && allowedPost.test(path);
+  if (!isDocument && !isRrm && !isFoundationPost) {
     return NextResponse.json({ code: "NOT_FOUND" }, { status: 404 });
   }
-  if (method === "POST") {
+  if (method !== "GET") {
     const origin = request.headers.get("origin");
     if (origin && origin !== request.nextUrl.origin) {
       return NextResponse.json({ code: "FORBIDDEN_ORIGIN" }, { status: 403 });
@@ -27,15 +34,19 @@ async function forward(request: NextRequest, segments: string[], method: "GET" |
   const url = `${apiBaseUrl()}/api/v1/${path}${method === "GET" ? request.nextUrl.search : ""}`;
   const contentType = request.headers.get("content-type");
   const declaredLength = Number(request.headers.get("content-length") ?? 0);
-  if (method === "POST" && declaredLength > requestLimit) {
+  const maxLength = isRrm || isFoundationPost ? rrmRequestLimit : requestLimit;
+  if (method !== "GET" && (isRrm || isFoundationPost) && contentType?.split(";")[0] !== "application/json") {
+    return NextResponse.json({ code: "INVALID_CONTENT_TYPE" }, { status: 415 });
+  }
+  if (method !== "GET" && declaredLength > maxLength) {
     return NextResponse.json({ code: "REQUEST_TOO_LARGE" }, { status: 413 });
   }
   let exceeded = false;
   let bytes = 0;
-  const body = method === "POST" && request.body ? request.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+  const body = method !== "GET" && request.body ? request.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
       bytes += chunk.byteLength;
-      if (bytes > requestLimit) {
+      if (bytes > maxLength) {
         exceeded = true;
         controller.error(new Error("REQUEST_TOO_LARGE"));
       } else controller.enqueue(chunk);
@@ -47,7 +58,7 @@ async function forward(request: NextRequest, segments: string[], method: "GET" |
     method,
     headers: {
       Authorization: `Bearer ${session.access_token}`,
-      ...(contentType && method === "POST" ? { "Content-Type": contentType } : {}),
+      ...(contentType && method !== "GET" ? { "Content-Type": contentType } : {}),
     },
     body,
     duplex: "half",
@@ -76,4 +87,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
 export async function POST(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
   return forward(request, path, "POST");
+}
+
+export async function PATCH(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
+  const { path } = await context.params;
+  return forward(request, path, "PATCH");
 }

@@ -1,5 +1,52 @@
 # AI Usage Declaration
 
+## Phase 3 closure candidate — 2026-09-24
+
+| Field | Value |
+|---|---|
+| Tool | OpenAI Codex |
+| Purpose | Final repository consistency audit and documentation of the owner's accepted Phase 3 closure decisions |
+| Scope | Documentation only: Phase 3 implementation/QA notes, Phase Plan, SRS traceability status and this declaration. No application code, migrations, live rows, Phase 4, commit, push or deployment. |
+| Accepted decisions | SECURITY_TRAINING r2 stays AMBIGUOUS and blocks submission without an invented trigger. Final competition dataset inventory and expanded adversarial/live database attack checks are Phase 7 gates. Intermittent data-service incident remains non-reproducible with safe diagnostics available. |
+| Status | COMPLETE / LOCKED CANDIDATE, pending final gate results and a separate Git commit. No new live security test result claimed. |
+
+
+## Phase 3 intermittent data-service 503 investigation
+
+| Field | Value |
+|---|---|
+| Tool | OpenAI Codex |
+| Purpose | Diagnose reported live 503 responses and Requirements page render failure |
+| Finding | Historic `DATA_SERVICE_UNAVAILABLE` mapping discarded the underlying exception/status. Current signed-in browser reads recovered; the prior upstream cause could not be reconstructed from old logs. Server rendering lacked a route retry state. |
+| Changes | Add safe gateway diagnostics (table, exception class, upstream status, response receipt, client closed state), controlled regression tests, and a Requirements route error/retry component. No token/header/body/raw exception logging, auth changes, retry of writes, or timeout increase. |
+| Tests | Focused backend 61 passed, full backend 291 passed with one existing warning and normal exit 0; focused frontend 19 passed, all frontend 28 passed; TypeScript, ESLint, production build, diff check and scoped secret scan passed. |
+| Live status | API health 200; Requirements page, matrix/config list and Candidates rendered in a signed-in browser. Direct authenticated FastAPI status/underlying historic exception remains unverified. No RRM row created or changed. |
+
+
+## Phase 3 Manual Review issue action visibility correction
+
+| Field | Value |
+|---|---|
+| Tool | OpenAI Codex |
+| Purpose | Diagnose a live reported missing issue action for a Training Manager |
+| Finding | The action was rendered only for the matrix creator although the existing authenticated issue API and SQL RPC allow a Training Manager to raise an issue on any DRAFT matrix. |
+| Change | Show the existing ambiguity issue action to authorized Admin/Training Manager on DRAFT matrices; retain creator-only edit/submit, authenticated API, duplicate check and version check. Add non-owner regression coverage. |
+| Tests | Focused RRM frontend 18 passed; all frontend 27 passed; TypeScript, ESLint, production build and git diff --check passed. Production build retried with approved access after sandbox trace-file EPERM. Backend and migration unchanged. |
+| Live status | No live issue or row was created; the corrected action still needs live acceptance. |
+
+
+## Phase 3 final QA — 2026-09-24
+
+| Field | Value |
+|---|---|
+| Tool | OpenAI Codex |
+| Purpose | Final static, automated and safely available live Phase 3 QA |
+| Changes | Bounded complete matrix relation pagination prevents silent dependency/issue truncation; Unicode code-point timing spans match Python/SQL; regression tests and Phase 3 audit documentation |
+| Files | rrm_service.py, test_rrm_bulk.py, frontend lib/rrm.ts and rrm-workflow.test.mjs, PHASE3_RRM_IMPLEMENTATION.md, PHASE3_FINAL_QA.md, this declaration |
+| Results | Focused backend 213 passed; full backend 287 passed, one existing warning, exit 0 and normal termination; focused frontend 17 passed, all frontend 26 passed; TypeScript, ESLint and production build passed. Build required approved retry after sandbox trace-file EPERM. Diff and scoped secret checks passed. |
+| Live evidence | Available browser redirected to login. No authenticated workflow test or live row mutation performed; no credentials requested. User-reported ambiguity rejection is not represented as newly executed evidence. |
+| Human review | Not locked. Live Manual Review/security acceptance and minimum dataset inventory/scope decision remain outstanding. No migration, Phase 4, commit, push or deployment. |
+
 ## Phase 0 entry
 
 | Field | Value |
@@ -118,3 +165,78 @@ Future AI-assisted work must add entries identifying prompts/assistance type, ex
 | Tests performed | Backend pytest: 74 passed, one upstream TestClient deprecation warning; frontend lint, TypeScript check, and production build passed. Static security and staged secret/diff checks performed separately before commit. |
 | Human review status | Project owner authorized Phase 2 final closeout after reporting live workflow verification. Detailed direct RPC/table/Storage attack checks are not claimed as executed. |
 | Verifying team member | Project owner (manual live evidence and closeout decision) |
+
+## Phase 3A.1 domain/data foundation entry
+
+| Field | Value |
+|---|---|
+| Tool | OpenAI Codex |
+| Purpose | Implement only the approved deterministic/manual RRM foundation checkpoint |
+| Prompt / assistance type | Human-approved Phase 3 design and bounded 3A.1 brief; domain modeling, pure rules, additive SQL, adversarial tests and pre-migration static review |
+| Files/features affected | `services/api/app/rrm_models.py`, `rrm_rules.py`, `services/api/tests/test_rrm.py`, `test_rrm_sql_contract.py`, `supabase/migrations/202609230003_rrm_foundation.sql`, `docs/PHASE3_RRM_IMPLEMENTATION.md`, this declaration |
+| Modification performed | Added immutable requirement revisions and draft-edit history, evidence/applicability, matrix lifecycle/security, explicit authority/stage configuration, timing evidence, deterministic eligibility/hash rules and append-only issue resolutions. No existing application route or locked migration changed. |
+| Tests performed | Backend pytest: **214 passed** (74 existing regression cases plus 140 new cases: 110 domain/rule and 30 static SQL contract cases); one existing upstream TestClient deprecation warning. Frontend lint, typecheck and production build passed; build required filesystem escalation after a sandbox trace-file EPERM. Git diff/whitespace and seven-file secret-pattern checks passed. No PostgreSQL migration, runtime/RLS/concurrency test or live Supabase test was executed. |
+| Human review status | **Checkpoint pending migration review. Phase 3 is not complete.** Migration not applied; no commit, push or deployment. |
+| Verifying team member | Pending human review |
+
+## Phase 3A.2 ambiguous-timing manual-review UX correction
+
+| Field | Value |
+|---|---|
+| Tool | OpenAI Codex |
+| Purpose | Complete bounded RRM readiness, issue-routing and immutable timing-revision UX following live human review |
+| Files/features affected | `services/api/app/rrm_service.py`, `services/api/tests/test_rrm_api.py`, `apps/web/src/lib/rrm.ts`, `apps/web/src/components/requirements/requirements-workspace.tsx`, `apps/web/tests/rrm-workflow.test.mjs`, `docs/PHASE3_RRM_IMPLEMENTATION.md`, this declaration |
+| Modification performed | Ambiguous active timing now blocks advisory readiness and the submit control; authors can raise an explicit ambiguity issue; structured timing revision requires exact linked chunk spans for every field and retains original text; an issue resolution alone does not clear timing. Existing SQL transition remains authoritative and unchanged. |
+| Tests performed | Frontend focused/full available tests: 20 passed; frontend lint, typecheck and production build passed. The backend shutdown gate subsequently identified an inaccessible pytest cache under restricted runs; after the test-runner correction, full backend pytest exited normally with **285 passed, 1 existing deprecation warning**. Scoped secret-pattern and diff whitespace checks returned no finding. |
+| Human review status | Pending human workflow review. No live requirement/matrix changes, migration, commit, push or deployment. |
+| Verifying team member | Pending human review |
+
+## Backend pytest shutdown gate
+
+| Field | Value |
+|---|---|
+| Tool | OpenAI Codex |
+| Purpose | Diagnose and correct the post-test pytest shutdown hang before Phase 3A.2 review |
+| Files/features affected | `services/api/pytest.ini`, `services/api/tests/test_rrm_bulk.py`, this declaration |
+| Root cause / correction | Even one static SQL test hung after its progress reached 100% under the restricted workspace, while it exited normally outside that restriction. The legacy `services/api/.pytest_cache` was inaccessible and pytest's optional cacheprovider stalled on session completion. Disabling only cacheprovider for this backend suite restored normal exit; fixture teardown, FastAPI lifespan and shared `httpx.AsyncClient` closure remain active. No application or database behavior changed. |
+| Tests performed | Focused client/lifecycle: **3 passed**; focused RRM API: **22 passed**; full backend pytest: **285 passed, 1 existing Starlette/TestClient deprecation warning**, final summary printed, exit code 0, normal process termination. Repeated app lifecycles close distinct pools, and user Authorization remains per request. |
+| Human review status | Shutdown gate complete; Phase 3A.2 still pending human workflow review. No live data change, migration, commit, push or deployment. |
+| Verifying team member | Pending human review |
+
+## Phase 3A.2 human RRM workflow implementation
+
+| Field | Value |
+|---|---|
+| Tool | OpenAI Codex |
+| Purpose | Implement the human source-backed requirement and role-matrix workflow on the already-applied Phase 3A.1 contract |
+| Files/features affected | `services/api/app/rrm.py`, `rrm_service.py`, `rrm_repository.py`, `main.py`, new RRM API tests; Next.js requirements page/workspace, typed RRM client and narrow gateway extension, frontend tests; Phase 3 implementation notes and this declaration |
+| Modification performed | Added user-JWT FastAPI list/read/create/edit/transition/issue/ground-truth routes; current-effective source prechecks, safe error mapping, role-aware evidence-first candidate and matrix UI, explicit Admin override controls. No migration, Gemini, plan generation, service-role workflow expansion, deployment, commit or push. |
+| Tests performed | New backend RRM API tests: 15 passed. New frontend RRM tests: 6 passed. Full-suite and production gate results are recorded in the final task handoff; no live database attack result is inferred. |
+| Human review status | Phase 3A.2 pending manual workflow review. Phase 3A.1 direct SQL/RLS/RPC/security checks remain pending. Phase 3 is not complete or locked. |
+| Verifying team member | Pending human review |
+
+## Phase 3A.1 pre-migration audit correction entry
+
+| Field | Value |
+|---|---|
+| Tool | OpenAI Codex |
+| Purpose | Fix only audit findings F1, F2 and F3 before migration |
+| Prompt / assistance type | Human-directed bounded security/correctness fixes and focused read-only re-audit |
+| Files/features affected | `rrm_models.py`, `rrm_rules.py`, both Phase 3 test modules, `202609230003_rrm_foundation.sql`, `docs/PHASE3_RRM_IMPLEMENTATION.md`, this declaration |
+| Modification performed | Explicit UTC canonical timestamps/date eligibility; mandatory downgrade request, reason and exact source evidence enforced within existing matrix review; common deterministic nonblank reason validation. No Phase 1/2 migration, route, parser, grant expansion or service-role change. |
+| Tests performed | Complete backend: **249 passed**, one existing TestClient deprecation warning. Focused Phase 3: **175 passed**; **35 added regression cases**. Frontend lint/typecheck/build passed; build retried with filesystem permission after `.next/trace` EPERM. Diff/whitespace and secret-pattern checks performed. |
+| Re-audit / limitations | No remaining known Blocker/High in scoped static re-audit. Database execution, timezone RPC behavior, RLS/concurrency and SQL/Python hash parity remain REQUIRED LIVE TEST; no live Supabase results claimed. Evidence presence still requires human semantic review. |
+| Human review status | **Fixes ready for review, not locked.** Migration remains unapplied. No commit, push, deployment or Phase 3A.2 implementation. |
+| Verifying team member | Pending human review |
+
+## Login form security correction after interrupted Phase 3A.1 live verification
+
+| Field | Value |
+|---|---|
+| Tool | OpenAI Codex |
+| Purpose | Prevent native login form fallback from placing credentials in a URL when client JavaScript is unavailable |
+| Files/features affected | `apps/web/src/app/login/page.tsx`, `apps/web/tests/login-form-security.test.mjs`, `apps/web/package.json`, this declaration |
+| Modification performed | Added explicit POST fallback, removed native form names from credential inputs, and disabled submission in server HTML until hydration. Supabase client authentication, session handling, RBAC, and backend authorization were not changed. |
+| Tests performed | Four focused executable auth tests passed; frontend lint, TypeScript check, and production build passed; backend regression 249 passed with one existing TestClient deprecation warning. Secret-pattern and diff checks performed separately. |
+| Human review status | Login security fix pending review. No real browser login result is claimed; Phase 3A.1 live verification remains paused. No migration edits, commit, push, or deployment. |
+| Verifying team member | Pending human review |

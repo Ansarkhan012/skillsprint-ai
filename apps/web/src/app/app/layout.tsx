@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/layout/app-shell";
-import { api, ApiError, type Me } from "@/lib/api";
+import { requestMe, ApiError, type Me } from "@/lib/api";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function ProtectedLayout({ children }: { children: React.ReactNode }) {
@@ -11,7 +11,7 @@ export default async function ProtectedLayout({ children }: { children: React.Re
   if (!session) redirect("/login");
   let me: Me;
   try {
-    me = await api.me(session.access_token);
+    me = await requestMe(session.access_token);
   } catch (error) {
     if (error instanceof ApiError && [401, 403].includes(error.status)) redirect("/access-denied");
     throw error;

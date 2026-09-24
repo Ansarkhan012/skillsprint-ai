@@ -1,6 +1,6 @@
 # SRS Traceability and Priority Matrix
 
-Status: **ALL ITEMS PLANNED; NOTHING IN THIS MATRIX IS IMPLEMENTED.**  
+Status: **Planning traceability baseline; implementation status varies by phase.** Phase 0/1/2 are locked, and Phase 3 is a complete/locked candidate pending its final commit. Phase 3 closeout explicitly deferred the final competition dataset inventory and expanded adversarial/live database attack verification to Phase 7; the SRS targets remain unchanged.
 Source: SRS v1.0 sections 1.1-1.10. Priority labels are **engineering interpretation** for a ~3-day competition build unless marked `SRS explicit`. MUST means required for the core evaluated path or expressly mandatory; SHOULD means required by the SRS but sequenced after the core path; NICE means optional/extension wording or deferrable polish. This prioritization does not waive any SRS final-deliverable obligation.
 
 Legend: F=Foundation, DI=Document Intelligence, RRM=Ground Truth, G=GenAI, VJ=Validation/JEV, UI=Product UI, QA=Hidden Evaluation/QA, D=Deployment/Submission.

@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "test:auth": "node --test tests/login-form-security.test.mjs",
+    "test:rrm": "node --test tests/rrm-workflow.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
