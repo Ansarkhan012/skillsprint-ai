@@ -1,6 +1,6 @@
 """Phase 5 requests contain identities or human actions, never validator conclusions."""
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .models import AppRole, Principal
 from .security import require_roles
@@ -12,6 +12,13 @@ router = APIRouter(prefix="/api/v1", tags=["validation"])
 AUTHOR = require_roles(AppRole.ADMIN, AppRole.TRAINING_MANAGER)
 READ = require_roles(AppRole.ADMIN, AppRole.TRAINING_MANAGER, AppRole.REVIEWER)
 REVIEW = require_roles(AppRole.ADMIN, AppRole.REVIEWER)
+
+
+@router.get("/validation-runs")
+async def list_validations(offset: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100),
+                          principal: Principal = Depends(READ),
+                          repository: ValidationRepository = Depends(get_validation_repository)):
+    return await repository.list_runs(principal.token, offset, limit)
 
 
 @router.post("/generated-plans/{plan_id}/validate")

@@ -1,0 +1,14 @@
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import type { Me } from "@/lib/api";
+import { createClient } from "@/lib/supabase/browser";
+import { humanize } from "@/lib/product";
+import { PageHeader } from "@/components/shared/page-header";
+import { Button } from "@/components/ui/button";
+import { Fields, panel } from "./common";
+export function Settings({ me }: { me: Me }) {
+  const router = useRouter(); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  async function signOut() { if (busy) return; setBusy(true); setError(""); try { const result = await createClient().auth.signOut(); if (result.error) throw result.error; router.replace("/login"); router.refresh(); } catch { setError("Sign out could not be completed. Please try again."); } finally { setBusy(false); } }
+  return <div className="space-y-6"><PageHeader eyebrow="Account" title="Settings" description="Your identity, workspace access and system responsibilities." /><div className="grid gap-5 lg:grid-cols-2"><section className={`${panel} space-y-4`}><h2 className="font-semibold">Profile & access</h2><Fields values={{ "Display name": me.display_name, "Application roles": me.roles.map(humanize).join(", "), "Workspace": "Single organization", "Authentication": "Supabase authenticated session" }} /><p className="text-xs text-muted-foreground">Profile and role changes require administrator support. Job roles belong to employee records and do not grant application permissions.</p></section><section className={`${panel} space-y-4`}><h2 className="font-semibold">Session security</h2><p className="text-sm text-muted-foreground">Server authorization and database row policies govern access. Sign out when using a shared device.</p><Button variant="outline" disabled={busy} onClick={() => void signOut()}>{busy ? "Signing out…" : "Sign out"}</Button>{error && <p role="alert" className="text-sm text-destructive">{error}</p>}</section><section className={`${panel} space-y-4`}><h2 className="font-semibold">Generation</h2><p className="text-sm leading-6 text-muted-foreground">Provider, model, prompt contract and source provenance are recorded on each generation run. Runtime provider settings are managed on the server and cannot be changed here.</p><p className="text-sm">Generated plans begin as <strong>Unverified</strong>.</p></section><section className={`${panel} space-y-4`}><h2 className="font-semibold">Validation & human review</h2><p className="text-sm leading-6 text-muted-foreground">An independent Python validator checks plan evidence. JEV derives a deterministic decision. Human actions remain separate, audited dispositions. Validator and JEV versions are shown with each validation result.</p><p className="text-xs text-muted-foreground">No AI confidence score is used for approval.</p></section></div></div>;
+}

@@ -13,6 +13,12 @@ class ValidationRepository(GenerationRepository):
         super().__init__(rrm)
         self._trusted_key = trusted_key
 
+    async def list_runs(self, token, offset, limit):
+        rows = await self.rrm.rows(token, "validation_runs", {
+            "select": "id,generated_plan_id,validator_version,completed_at,summary,jev_decisions(status)",
+            "order": "completed_at.desc,id.desc", "offset": str(offset), "limit": str(limit + 1)})
+        return {"items": rows[:limit], "offset": offset, "limit": limit, "has_more": len(rows) > limit}
+
     async def load_plan(self, token, plan_id):
         plans = await self.rrm.rows(token, "generated_plans", {
             "select": "id,run_id,status,schema_version,content,content_hash", "id": f"eq.{plan_id}", "limit": "1"})
@@ -63,6 +69,11 @@ class ValidationRepository(GenerationRepository):
             raise HTTPException(404, "VALIDATION_NOT_FOUND")
         result = rows[0]
         vid = result["id"]
+        plans = await self.rrm.rows(token, "generated_plans", {
+            "select": "run_id", "id": f"eq.{result['generated_plan_id']}", "limit": "1"})
+        context = await self.rrm.rows(token, "generation_runs", {
+            "select": "id,employee_id,employee_profile_id,created_by", "id": f"eq.{plans[0]['run_id']}", "limit": "1"}) if plans else []
+        result["plan_context"] = context[0] if context else None
         count = result.get("summary", {}).get("finding_count")
         if not isinstance(count, int) or not 0 <= count <= 2000:
             raise HTTPException(503, "VALIDATION_DATA_UNAVAILABLE")

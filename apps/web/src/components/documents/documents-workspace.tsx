@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import { FilePlus2, FileText, Search, ShieldCheck } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { CompanyDocument, DocumentChunk, DocumentPage, DocumentVersion, UploadResult, documentRequest, latestVersion } from "@/lib/documents";
 
 type Department = { id: string; code: string; name: string };
-type Props = { initialDocuments: DocumentPage<CompanyDocument>; departments: Department[]; canUpload: boolean; canReview: boolean; isAdmin: boolean };
+type Props = { initialDocuments: DocumentPage<CompanyDocument>; departments: Department[]; canUpload: boolean; canReview: boolean; isAdmin: boolean; actorId: string };
 
 function DocumentBadge({ status }: { status: string }) {
   const tone = status === "APPROVED" || status === "PARSED" ? "success"
@@ -23,7 +23,7 @@ function ErrorMessage({ message }: { message: string }) {
   return <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{message}</p>;
 }
 
-export function DocumentsWorkspace({ initialDocuments, departments, canUpload, canReview, isAdmin }: Props) {
+export function DocumentsWorkspace({ initialDocuments, departments, canUpload, canReview, isAdmin, actorId }: Props) {
   const [documentPage, setDocumentPage] = useState(initialDocuments);
   const documents = documentPage.items;
   const [search, setSearch] = useState("");
@@ -41,6 +41,8 @@ export function DocumentsWorkspace({ initialDocuments, departments, canUpload, c
   const [notice, setNotice] = useState("");
   const [reason, setReason] = useState("");
   const [existingId, setExistingId] = useState("");
+  const actionLock = useRef(false);
+  const selfReview = selectedVersion?.uploaded_by === actorId || selectedVersion?.submitted_by === actorId;
 
   const visible = useMemo(() => documents.filter((document) => {
     const latest = latestVersion(document);
@@ -80,6 +82,8 @@ export function DocumentsWorkspace({ initialDocuments, departments, canUpload, c
 
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (actionLock.current) return;
+    actionLock.current = true;
     setBusy(true); setError(""); setNotice("");
     try {
       const form = new FormData(event.currentTarget);
@@ -97,11 +101,13 @@ export function DocumentsWorkspace({ initialDocuments, departments, canUpload, c
       await openDocument(result.document_id, result.version_id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "UPLOAD_FAILED");
-    } finally { setBusy(false); }
+    } finally { actionLock.current = false; setBusy(false); }
   }
 
   async function act(action: "submit" | "approve" | "reject") {
-    if (!selectedVersion || !selected) return;
+    if (!selectedVersion || !selected || actionLock.current) return;
+    if (!window.confirm(`Confirm ${action} for ${selected.title} ${selectedVersion.version_label}?`)) return;
+    actionLock.current = true;
     setBusy(true); setError(""); setNotice("");
     try {
       await documentRequest(`document-versions/${selectedVersion.id}/${action}`, {
@@ -115,7 +121,7 @@ export function DocumentsWorkspace({ initialDocuments, departments, canUpload, c
       setNotice(`Version ${action === "submit" ? "submitted" : action === "approve" ? "approved" : "rejected"}.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "DOCUMENT_ACTION_FAILED");
-    } finally { setBusy(false); }
+    } finally { actionLock.current = false; setBusy(false); }
   }
 
   async function retryVersion() {
@@ -181,7 +187,7 @@ export function DocumentsWorkspace({ initialDocuments, departments, canUpload, c
         <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground"><tr><th scope="col" className="px-5 py-3">Document</th><th scope="col" className="px-4 py-3">Category</th><th scope="col" className="px-4 py-3">Department</th><th scope="col" className="px-4 py-3">Version</th><th scope="col" className="px-4 py-3">Status</th><th scope="col" className="px-4 py-3">Effective</th><th scope="col" className="px-4 py-3">Action</th></tr></thead>
         <tbody>{visible.map((item) => { const version = latestVersion(item); return <tr key={item.id} className="border-t border-border align-top"><td className="px-5 py-4"><span className="block font-semibold">{item.title}</span><span className="text-xs text-muted-foreground">{item.document_code}</span></td><td className="px-4 py-4">{item.category}</td><td className="px-4 py-4">{departments.find((department) => department.id === item.department_id)?.name ?? "General"}</td><td className="px-4 py-4">{version?.version_label ?? "—"}</td><td className="px-4 py-4">{version ? <DocumentBadge status={version.review_status === "DRAFT" && version.parse_status !== "PARSED" ? version.parse_status : version.review_status} /> : "—"}</td><td className="px-4 py-4">{version?.effective_date ?? "—"}</td><td className="px-4 py-4"><Button type="button" variant="outline" size="sm" onClick={() => openDocument(item.id)}>View details</Button></td></tr>; })}</tbody>
       </table></div> : <div className="p-6"><EmptyState icon={FileText} title="No documents match" description="Try another filter, or upload a source document if your role permits it." /></div>}
-      <div className="flex items-center justify-between border-t border-border p-4 text-sm"><span>Document page {Math.floor(documentPage.offset / documentPage.limit) + 1}{documentPage.has_more ? " · more documents available" : " · last page"}</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={busy || documentPage.offset === 0} onClick={() => refreshDocuments(Math.max(0, documentPage.offset - documentPage.limit))}>Previous</Button><Button variant="outline" size="sm" disabled={busy || !documentPage.has_more} onClick={() => refreshDocuments(documentPage.offset + documentPage.limit)}>Next</Button></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border p-4 text-sm"><span>Document page {Math.floor(documentPage.offset / documentPage.limit) + 1}{documentPage.has_more ? " · more documents available" : " · last page"}</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={busy || documentPage.offset === 0} onClick={() => refreshDocuments(Math.max(0, documentPage.offset - documentPage.limit))}>Previous</Button><Button variant="outline" size="sm" disabled={busy || !documentPage.has_more} onClick={() => refreshDocuments(documentPage.offset + documentPage.limit)}>Next</Button></div></div>
     </section>
 
     {selected && <section className="rounded-md border border-border bg-card p-5 shadow-panel sm:p-6" aria-labelledby="detail-heading">
@@ -194,7 +200,7 @@ export function DocumentsWorkspace({ initialDocuments, departments, canUpload, c
           <div><dt className="text-muted-foreground">Latest version</dt><dd className="mt-1 font-semibold">{latestVersion(selected)?.version_label ?? "—"}</dd></div>
           <div><dt className="text-muted-foreground">Current effective version</dt><dd className="mt-1 font-semibold">{currentEffective?.version_label ?? "None"}</dd></div>
           <div><dt className="text-muted-foreground">Effective</dt><dd className="mt-1 font-semibold">{selectedVersion.effective_date}</dd></div>
-          <div><dt className="text-muted-foreground">Expires</dt><dd className="mt-1 font-semibold">{selectedVersion.expiry_date ?? "Not set"}</dd></div>
+          <div><dt className="text-muted-foreground">Uploaded</dt><dd className="mt-1 font-semibold">{new Date(selectedVersion.created_at).toLocaleString()}</dd></div><div><dt className="text-muted-foreground">Expires</dt><dd className="mt-1 font-semibold">{selectedVersion.expiry_date ?? "Not set"}</dd></div>
           <div className="sm:col-span-2"><dt className="text-muted-foreground">Original filename</dt><dd className="mt-1 break-all font-semibold">{selectedVersion.original_filename ?? "—"}</dd></div>
           <div className="sm:col-span-2"><dt className="text-muted-foreground">Version ID</dt><dd className="mt-1 break-all font-mono text-xs">{selectedVersion.id}</dd></div>
         </dl>
@@ -203,11 +209,11 @@ export function DocumentsWorkspace({ initialDocuments, departments, canUpload, c
         {canUpload && ["UPLOADED", "PROCESSING"].includes(selectedVersion.parse_status) && <div className="mt-4 space-y-2"><label className="block text-sm">Original file (only needed if Storage upload did not complete)<Input id="retry-original" type="file" accept=".pdf,.docx" /></label><Button variant="outline" disabled={busy} onClick={retryVersion}>Retry processing</Button></div>}
         <div className="mt-5 flex flex-wrap items-end gap-3">
           {canUpload && selectedVersion.parse_status === "PARSED" && selectedVersion.review_status === "DRAFT" && <Button disabled={busy} onClick={() => act("submit")}>Submit for review</Button>}
-          {canReview && selectedVersion.review_status === "SUBMITTED" && <><label className="min-w-60 flex-1 text-sm font-semibold">Decision reason (required for rejection or Admin self-review)<Input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} /></label>{isAdmin && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={override} onChange={(event) => setOverride(event.target.checked)} />Explicit emergency self-review override</label>}<Button disabled={busy} onClick={() => act("approve")}><ShieldCheck size={16} />Approve</Button><Button variant="outline" disabled={busy || !reason.trim()} onClick={() => act("reject")}>Reject</Button></>}
+          {canReview && selectedVersion.review_status === "SUBMITTED" && <><label className="min-w-60 flex-1 text-sm font-semibold">Decision reason (required for rejection or Admin self-review)<Input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} /></label>{isAdmin && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={override} onChange={(event) => setOverride(event.target.checked)} />Explicit emergency self-review override</label>}<Button disabled={busy || (selfReview && !(isAdmin && override && reason.trim())) || (override && !reason.trim())} onClick={() => act("approve")}><ShieldCheck size={16} />Approve</Button><Button variant="outline" disabled={busy || !reason.trim() || (selfReview && !(isAdmin && override))} onClick={() => act("reject")}>Reject</Button></>}
         </div>
         <div className="mt-7"><h3 className="text-base font-semibold">Extracted source preview</h3><p className="mt-1 text-sm text-muted-foreground">Each chunk retains a stable key and its original page, paragraph, or table location.</p>
-          {chunks.length ? <ol className="mt-4 space-y-3">{chunks.map((chunk) => <li key={chunk.id} className="rounded-md border border-border p-4"><div className="flex flex-wrap gap-2 text-xs font-semibold text-muted-foreground"><span>Chunk {chunk.sequence + 1}</span>{chunk.page_number && <span>PDF page {chunk.page_number}</span>}{chunk.paragraph_start && <span>DOCX paragraph {chunk.paragraph_start}</span>}{chunk.source_location.table != null && <span>Table {String(chunk.source_location.table)}, row {String(chunk.source_location.row)}, cell {String(chunk.source_location.cell)}</span>}{chunk.section_path && <span>Section: {chunk.section_path}</span>}</div><p className="mt-2 whitespace-pre-wrap text-sm leading-6">{chunk.content}</p><p className="mt-3 break-all font-mono text-[11px] text-muted-foreground">{chunk.chunk_key}</p></li>)}</ol> : <div className="mt-4"><EmptyState icon={FileText} title="No extractable chunks" description="The original is retained. Review the processing status before submission." /></div>}
-          {selectedVersion.parse_status === "PARSED" && <div className="mt-4 flex items-center justify-between text-sm"><span>Chunks {chunkPage.offset + 1}–{chunkPage.offset + chunks.length} · page {Math.floor(chunkPage.offset / chunkPage.limit) + 1}{chunkPage.has_more ? " · more chunks available" : " · last page"}</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={busy || chunkPage.offset === 0} onClick={() => loadChunkPage(selectedVersion.id, Math.max(0, chunkPage.offset - chunkPage.limit))}>Previous chunks</Button><Button variant="outline" size="sm" disabled={busy || !chunkPage.has_more} onClick={() => loadChunkPage(selectedVersion.id, chunkPage.offset + chunkPage.limit)}>Next chunks</Button></div></div>}
+          {chunks.length ? <ol className="mt-4 space-y-3">{chunks.map((chunk) => <li key={chunk.id} className="rounded-md border border-border p-4"><div className="flex flex-wrap gap-2 text-xs font-semibold text-muted-foreground"><span>Chunk {chunk.sequence + 1}</span>{chunk.page_number && <span>PDF page {chunk.page_number}</span>}{chunk.paragraph_start && <span>DOCX paragraph {chunk.paragraph_start}</span>}{chunk.source_location.table != null && <span>Table {String(chunk.source_location.table)}, row {String(chunk.source_location.row)}, cell {String(chunk.source_location.cell)}</span>}{chunk.section_path && <span>Section: {chunk.section_path}</span>}</div><details className="mt-2 text-sm"><summary className="cursor-pointer font-medium text-primary">Read source excerpt</summary><p className="mt-2 whitespace-pre-wrap leading-6">{chunk.content}</p><p className="mt-3 break-all font-mono text-[11px] text-muted-foreground">Integrity key: {chunk.chunk_key}</p></details></li>)}</ol> : <div className="mt-4"><EmptyState icon={FileText} title="No extractable chunks" description="The original is retained. Review the processing status before submission." /></div>}
+          {selectedVersion.parse_status === "PARSED" && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm"><span>Chunks {chunkPage.offset + 1}–{chunkPage.offset + chunks.length} · page {Math.floor(chunkPage.offset / chunkPage.limit) + 1}{chunkPage.has_more ? " · more chunks available" : " · last page"}</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={busy || chunkPage.offset === 0} onClick={() => loadChunkPage(selectedVersion.id, Math.max(0, chunkPage.offset - chunkPage.limit))}>Previous chunks</Button><Button variant="outline" size="sm" disabled={busy || !chunkPage.has_more} onClick={() => loadChunkPage(selectedVersion.id, chunkPage.offset + chunkPage.limit)}>Next chunks</Button></div></div>}
         </div></>}
       </>}
     </section>}

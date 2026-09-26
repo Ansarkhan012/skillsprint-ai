@@ -239,3 +239,28 @@ test("existing document POST remains allowed with its original content type", as
   assert.equal(calls[0].url, "http://api.test/api/v1/documents/uploads");
   assert.equal(calls[0].init.headers["Content-Type"], "multipart/form-data; boundary=test");
 });
+
+test("product read routes remain exact and preserve caller auth", async () => {
+  const id = "00000000-0000-4000-8000-000000000001";
+  const { gateway, calls } = loadGateway({ upstreamStatus: 200, upstreamBody: [] });
+  for (const path of ["departments", "roles", "generation-runs", "validation-runs", "audit-events", `employees/${id}`, `validation-runs/${id}`, `generated-plans/${id}/validation`]) {
+    assert.equal((await get(gateway, path)).status, 200, path);
+    assert.equal(calls.at(-1).init.headers.Authorization, "Bearer synthetic-test-session");
+  }
+  for (const path of ["profiles", "profile_roles", "audit_logs", "validation-runs/extra", `employees/${id}/delete`]) assert.equal((await get(gateway, path)).status, 404);
+});
+
+test("validation writes enforce origin session JSON and forward exact human request", async () => {
+  const id = "00000000-0000-4000-8000-000000000001";
+  const path = `validation-runs/${id}/review`, body = { action: "OVERRIDE", reason: "Independent reviewed exception" };
+  const { gateway, calls } = loadGateway({ upstreamStatus: 409, upstreamBody: { code: "VALIDATION_STATE_CONFLICT" } });
+  assert.equal((await post(gateway, path, { body })).status, 409);
+  assert.deepEqual(JSON.parse(calls[0].body), body);
+  assert.equal((await post(gateway, path, { origin: "https://other.test" })).status, 403);
+  assert.equal((await post(gateway, path, { contentType: "text/plain" })).status, 415);
+  assert.equal((await post(gateway, "validation-runs", { body })).status, 404);
+  assert.equal((await post(gateway, `generated-plans/${id}/validate`)).status, 409);
+  const anonymous = loadGateway({ authenticated: false });
+  assert.equal((await post(anonymous.gateway, path, { body })).status, 401);
+  assert.equal(anonymous.calls.length, 0);
+});

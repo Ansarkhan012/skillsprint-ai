@@ -18,6 +18,10 @@ const page = read('../src/app/app/requirements/page.tsx');
 const requirementsError = read('../src/app/app/requirements/error.tsx');
 const apiSource = read('../src/lib/api.ts');
 const protectedLayout = read('../src/app/app/layout.tsx');
+const productHelpers = {};
+vm.runInNewContext(ts.transpileModule(read('../src/lib/product.ts'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText, { exports: productHelpers });
 
 function loadWorkspace(stateOverrides = {}) {
   const compiled = ts.transpileModule(workspace, {
@@ -38,6 +42,7 @@ function loadWorkspace(stateOverrides = {}) {
     '@/components/ui/input': { Input: simple('input') },
     '@/components/shared/page-header': { PageHeader: ({ title }) => React.createElement('h1', null, title) },
     '@/lib/rrm': { jsonRequest() {}, locator: () => 'Source', rrmMessage: () => 'Error', rrmRequest() {} },
+    '@/lib/product': productHelpers,
   };
   vm.runInNewContext(compiled, {
     exports, require: (name) => {

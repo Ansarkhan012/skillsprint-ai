@@ -12,6 +12,8 @@ const employeePath = /^employees$/;
 const generationPreflightGet = new RegExp(`^generation-runs/preflight/${uuid}$`);
 const generationDetailGet = new RegExp(`^generation-runs/${uuid}$`);
 const generationCreatePost = /^generation-runs$/;
+const productGet = new RegExp(`^(departments|roles|employees/${uuid}|generation-runs|validation-runs|validation-runs/${uuid}|generated-plans/${uuid}/validation|audit-events)$`);
+const productPost = new RegExp(`^(generated-plans/${uuid}/validate|validation-runs/${uuid}/review)$`);
 const rrmRequestLimit = 512 * 1024;
 const configuredFileLimit = Number(process.env.MAX_UPLOAD_BYTES ?? 15728640);
 const fileLimit = Number.isSafeInteger(configuredFileLimit) && configuredFileLimit > 0
@@ -26,8 +28,9 @@ async function forward(request: NextRequest, segments: string[], method: "GET" |
   const isGenerationPreflight = method === "GET" && generationPreflightGet.test(path);
   const isGenerationDetail = method === "GET" && generationDetailGet.test(path);
   const isGenerationCreate = method === "POST" && generationCreatePost.test(path);
+  const isProduct = method === "GET" ? productGet.test(path) : method === "POST" && productPost.test(path);
   const isDocument = method === "GET" ? allowedGet.test(path) : method === "POST" && allowedPost.test(path);
-  if (!isDocument && !isRrm && !isFoundationPost && !isEmployee && !isGenerationPreflight && !isGenerationDetail && !isGenerationCreate) {
+  if (!isDocument && !isRrm && !isFoundationPost && !isEmployee && !isGenerationPreflight && !isGenerationDetail && !isGenerationCreate && !isProduct) {
     return NextResponse.json({ code: "NOT_FOUND" }, { status: 404 });
   }
   if (method !== "GET") {
@@ -42,8 +45,8 @@ async function forward(request: NextRequest, segments: string[], method: "GET" |
   const url = `${apiBaseUrl()}/api/v1/${path}${method === "GET" ? request.nextUrl.search : ""}`;
   const contentType = request.headers.get("content-type");
   const declaredLength = Number(request.headers.get("content-length") ?? 0);
-  const maxLength = isRrm || isFoundationPost || isEmployee || isGenerationCreate ? rrmRequestLimit : requestLimit;
-  if (method !== "GET" && (isRrm || isFoundationPost || isEmployee || isGenerationCreate) && contentType?.split(";")[0] !== "application/json") {
+  const maxLength = isRrm || isFoundationPost || isEmployee || isGenerationCreate || isProduct ? rrmRequestLimit : requestLimit;
+  if (method !== "GET" && (isRrm || isFoundationPost || isEmployee || isGenerationCreate || isProduct) && contentType?.split(";")[0] !== "application/json") {
     return NextResponse.json({ code: "INVALID_CONTENT_TYPE" }, { status: 415 });
   }
   if (method !== "GET" && declaredLength > maxLength) {

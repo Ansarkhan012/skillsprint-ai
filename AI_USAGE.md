@@ -264,6 +264,21 @@ Future AI-assisted work must add entries identifying prompts/assistance type, ex
 | Human review status | **Fixes ready for review, not locked.** Migration remains unapplied. No commit, push, deployment or Phase 3A.2 implementation. |
 | Verifying team member | Pending human review |
 
+## Phase 6 authenticated product experience
+
+Codex implemented real-data dashboard/reporting, employee and department/job-role
+directories and existing creation forms, generation history/accepted-plan viewing,
+independent validation/human review, evidence traceability, Admin audit, settings,
+account/error/loading states and responsive shell improvements. Small read-only
+backend additions expose existing context/list data under caller JWT/RLS; no
+schema, provider, prompt, validator/JEV or generation mutation behavior changed.
+Tests: 53 frontend passed; 99 focused backend passed; full backend 483 passed,
+one existing warning, normal exit 0. TypeScript/ESLint/build/diff checks passed;
+scoped credential-pattern scan found no matches. Browser automation was unavailable,
+so no live authenticated walkthrough or viewport verification is claimed. No
+provider/live-data calls, migration, commit, push or deployment. Pending human
+review; see `docs/PHASE6_PRODUCT_EXPERIENCE.md` for route inventory and limitations.
+
 ## Phase 5 independent validator and JEV foundation
 
 Codex implemented deterministic Python validation, versioned findings/JEV, authenticated APIs, immutable evidence/review persistence and an additive unapplied migration. The Phase 4 output model and generation code were not changed. Source timing without a comparable generated timing tuple requires MANUAL_REVIEW; factual prose entailment is not claimed. Tests: 53 focused Phase 5 checks; 474 full backend tests passed, one existing deprecation warning, normal exit 0. Diff and scoped credential-pattern checks passed. No provider request, live validation, database mutation, migration application, frontend build, commit, push or deployment. Human review and live migration/RLS verification remain pending.

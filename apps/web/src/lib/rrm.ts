@@ -187,5 +187,5 @@ const messages: Record<string, string> = {
 export function rrmMessage(error: unknown): string {
   const code = error && typeof error === "object" && "message" in error && typeof error.message === "string"
     ? error.message : "RRM_REQUEST_FAILED";
-  return messages[code] ?? code.replaceAll("_", " ").toLowerCase();
+  return messages[code] ?? "The requirement service could not complete this action. Refresh the workspace and check the selected evidence and permissions.";
 }

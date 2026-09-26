@@ -146,10 +146,13 @@ async def create_generation(
 
 @router.get("/generation-runs")
 async def list_generations(offset: int = 0, limit: int = 30,
+                           employee_id: UUID | None = None,
                            principal: Principal = Depends(READ),
                            store: GenerationStore = Depends(get_generation_store)) -> dict:
     if offset < 0 or not 1 <= limit <= 100:
         raise HTTPException(422, "INVALID_PAGE")
+    if employee_id is not None:
+        return await store.list_runs(principal.token, offset, limit, employee_id=employee_id)
     return await store.list_runs(principal.token, offset, limit)
 
 

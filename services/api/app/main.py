@@ -1,10 +1,10 @@
 import logging
 from contextlib import asynccontextmanager
 from time import perf_counter
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
@@ -85,26 +85,48 @@ async def admin_check(
 
 @app.get("/api/v1/departments")
 async def departments(
+    offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=100),
     principal: Principal = Depends(require_roles(AppRole.ADMIN, AppRole.TRAINING_MANAGER, AppRole.REVIEWER, AppRole.MANAGER)),
     gateway: SupabaseGateway = Depends(get_gateway),
 ) -> list[dict]:
-    return await gateway.request(principal.token, "departments", {"select": "id,code,name,parent_id,status", "order": "name.asc", "limit": "100"})
+    return await gateway.request(principal.token, "departments", {"select": "id,code,name,parent_id,status", "order": "name.asc,id.asc", "offset": str(offset), "limit": str(limit)})
 
 
 @app.get("/api/v1/roles")
 async def roles(
+    offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=100),
     principal: Principal = Depends(require_roles(AppRole.ADMIN, AppRole.TRAINING_MANAGER, AppRole.REVIEWER, AppRole.MANAGER)),
     gateway: SupabaseGateway = Depends(get_gateway),
 ) -> list[dict]:
-    return await gateway.request(principal.token, "roles", {"select": "id,code,name,department_id,status", "order": "name.asc", "limit": "100"})
+    return await gateway.request(principal.token, "roles", {"select": "id,code,name,department_id,status", "order": "name.asc,id.asc", "offset": str(offset), "limit": str(limit)})
 
 
 @app.get("/api/v1/employees")
 async def employees(
+    offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=100),
     principal: Principal = Depends(require_roles(AppRole.ADMIN, AppRole.TRAINING_MANAGER, AppRole.REVIEWER, AppRole.MANAGER)),
     gateway: SupabaseGateway = Depends(get_gateway),
 ) -> list[dict]:
-    return await gateway.request(principal.token, "employees", {"select": "id,employee_code,role_id,department_id,training_status,manager_employee_id", "order": "employee_code.asc", "limit": "100"})
+    return await gateway.request(principal.token, "employees", {"select": "id,employee_code,profile_id,role_id,department_id,experience_level,location_code,joining_date,training_status,manager_employee_id,profiles(display_name)", "order": "employee_code.asc,id.asc", "offset": str(offset), "limit": str(limit)})
+
+
+@app.get("/api/v1/employees/{employee_id}")
+async def employee_detail(employee_id: UUID,
+    principal: Principal = Depends(require_roles(AppRole.ADMIN, AppRole.TRAINING_MANAGER, AppRole.REVIEWER, AppRole.MANAGER)),
+    gateway: SupabaseGateway = Depends(get_gateway),
+) -> dict:
+    rows = await gateway.request(principal.token, "employees", {"select": "id,employee_code,profile_id,role_id,department_id,experience_level,location_code,joining_date,training_status,manager_employee_id,profiles(display_name)", "id": f"eq.{employee_id}", "limit": "1"})
+    if not rows:
+        raise HTTPException(404, "EMPLOYEE_NOT_FOUND")
+    return rows[0]
+
+
+@app.get("/api/v1/audit-events")
+async def audit_events(offset: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100),
+    principal: Principal = Depends(require_roles(AppRole.ADMIN)), gateway: SupabaseGateway = Depends(get_gateway),
+) -> dict:
+    rows = await gateway.request(principal.token, "audit_logs", {"select": "id,actor_profile_id,action,target_type,target_id,occurred_at", "order": "occurred_at.desc,id.desc", "offset": str(offset), "limit": str(limit + 1)})
+    return {"items": rows[:limit], "offset": offset, "limit": limit, "has_more": len(rows) > limit}
 
 
 @app.post("/api/v1/departments", status_code=201)

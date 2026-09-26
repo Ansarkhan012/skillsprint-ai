@@ -7,13 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/shared/page-header";
+import { timingLabel } from "@/lib/product";
 import { type Config, type GroundTruth, type Matrix, type MatrixSummary, type Page, type Requirement, type SourceChunk, type SourceVersion,
   buildCandidatePayload, buildDraftRevisionReplacement, buildStructuredTiming, jsonRequest, locator, requirementCategories, rrmMessage, rrmRequest, timingFields,
   type TimingField, type TimingSelection } from "@/lib/rrm";
 
 type JobRole = { id: string; code: string; name: string };
 type Department = { id: string; code: string; name: string };
-type Props = { me: Me; roles: JobRole[]; departments: Department[] };
+type Props = { me: Me; roles: JobRole[]; departments: Department[]; initialRoleId?: string };
 type Pane = "candidates" | "matrix" | "ground-truth";
 
 const selectClass = "h-10 w-full rounded-md border border-border bg-card px-3 text-sm";
@@ -33,17 +34,17 @@ function EvidenceBlock({ requirement }: { requirement: Requirement }) {
         {!item.current_eligible && <span className="ml-2 text-destructive">Not currently eligible</span>}
       </div>
       {item.chunk && <><div className="mt-1 text-xs text-muted-foreground">{item.chunk.heading ? `${item.chunk.heading} · ` : ""}{locator(item.chunk.source_location)}</div>
-        <p className="mt-2 whitespace-pre-wrap">{item.chunk.content}</p></>}
+        <details className="mt-2"><summary className="cursor-pointer text-primary">Exact source excerpt</summary><p className="mt-2 whitespace-pre-wrap">{item.chunk.content}</p></details></>}
     </div>)}
   </div>;
 }
 
-export function RequirementsWorkspace({ me, roles, departments }: Props) {
+export function RequirementsWorkspace({ me, roles, departments, initialRoleId }: Props) {
   const canAuthor = me.roles.includes("ADMIN") || me.roles.includes("TRAINING_MANAGER");
   const canReview = me.roles.includes("ADMIN") || me.roles.includes("REVIEWER");
   const isAdmin = me.roles.includes("ADMIN");
   const [pane, setPane] = useState<Pane>("matrix");
-  const [roleId, setRoleId] = useState(roles[0]?.id ?? "");
+  const [roleId, setRoleId] = useState(roles.find((role) => role.id === initialRoleId)?.id ?? roles[0]?.id ?? "");
   const [candidatePage, setCandidatePage] = useState<Page<Requirement>>(emptyPage());
   const [candidateReady, setCandidateReady] = useState(false);
   const [search, setSearch] = useState("");
@@ -276,7 +277,7 @@ export function RequirementsWorkspace({ me, roles, departments }: Props) {
   const submittedCount = matrices.items.filter((item) => item.status === "SUBMITTED").length;
 
   return <div className="space-y-7">
-    <PageHeader eyebrow="Ground truth · Phase 3A" title="Requirement Matrix"
+    <PageHeader eyebrow="Approved ground truth" title="Requirement Matrix"
       description="Turn approved document evidence into independently reviewed role requirements." />
     {error && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
     {notice && <p role="status" className="rounded-md border border-success/30 bg-success/5 p-3 text-sm text-success">{notice}</p>}
@@ -399,7 +400,7 @@ export function RequirementsWorkspace({ me, roles, departments }: Props) {
       </div>
     </div>}
 
-    {pane === "matrix" && <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+    {pane === "matrix" && <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
       <aside className={boxClass}>
         <div className="flex items-center gap-2"><ClipboardList size={18} /><h2 className="text-lg font-semibold">{selectedRole?.name ?? "Role"} revisions</h2></div>
         {canAuthor && <Button className="mt-4 w-full" onClick={() => void createMatrix()}
@@ -417,7 +418,7 @@ export function RequirementsWorkspace({ me, roles, departments }: Props) {
               <option value="">Unmapped</option><option value="DEPARTMENT_SOP">Department SOP</option><option value="COMPANY_POLICY">Company policy</option><option value="FAQ">FAQ</option><option value="INFORMAL_GUIDANCE">Informal guidance</option>
             </select>
           </label>)}
-          <Input name="reason" required placeholder="Reason for authority mapping" /><Button type="submit" disabled={busy}>Save configuration</Button>
+          <Input name="reason" required aria-label="Reason for authority mapping" placeholder="Reason for authority mapping" /><Button type="submit" disabled={busy}>Save configuration</Button>
         </form>}
         <div className="mt-4 space-y-2">{matrices.items.map((item) => <button key={item.id} className={`w-full rounded-md border p-3 text-left text-sm ${matrix?.id === item.id ? "border-primary bg-primary/5" : "border-border"}`} onClick={() => void run(() => loadMatrix(item.id), "Matrix loaded.")}>
           <span className="font-semibold">Revision {item.revision}</span> <Status value={item.status} /><span className="mt-1 block text-xs text-muted-foreground">Edit lock {item.lock_version}</span>
@@ -459,7 +460,7 @@ export function RequirementsWorkspace({ me, roles, departments }: Props) {
                 await jsonRequest(`issues/${issue.id}/resolve`, "POST", { expected_version: matrix.lock_version, reason, admin_override: false });
                 await loadMatrix(matrix.id);
               }, "Issue resolution recorded for this draft edit.");
-            }}><Input name="reason" required maxLength={2000} placeholder="Independent resolution reason" /><Button type="submit" variant="outline" disabled={busy}>Resolve issue</Button></form>}
+            }}><Input name="reason" required maxLength={2000} aria-label="Independent resolution reason" placeholder="Independent resolution reason" /><Button type="submit" variant="outline" disabled={busy}>Resolve issue</Button></form>}
           </div>)}</div>}
           {isDraftOwner && <div className="mt-5 rounded-md border border-border p-4"><h3 className="font-semibold">Draft entries</h3><p className="mt-1 text-xs text-muted-foreground">Select current requirement revisions, then save a new immutable edit. Submitted history is read-only.</p>
             <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">{candidatePage.items.map((candidate) => <label key={candidate.id} className="flex gap-2 text-sm"><input type="checkbox" checked={included.has(candidate.id)} onChange={(event) => {
@@ -476,7 +477,7 @@ export function RequirementsWorkspace({ me, roles, departments }: Props) {
           </div>}
           <div className="mt-5 space-y-4">{matrix.entries.map((entry) => { const req = matrix.requirements[entry.requirement_id]; return <article key={entry.requirement_id} className="rounded-md border border-border p-4">
             <div className="flex flex-wrap items-center gap-2"><span className="font-semibold">{entry.sequence + 1}. {req?.requirement_code ?? entry.requirement_id}</span>{req && <Status value={req.mandatory ? "MANDATORY" : "OPTIONAL"} />}</div>
-            {req && <><p className="mt-2 text-sm">{req.statement}</p><p className="mt-1 text-xs text-muted-foreground">Type {req.requirement_type} · Category {req.category} · Timing {JSON.stringify(req.timing)}</p>
+            {req && <><p className="mt-2 text-sm">{req.statement}</p><p className="mt-1 text-xs text-muted-foreground">Type {req.requirement_type} · Category {req.category} · Timing {timingLabel(req.timing)}</p>
               <p className="mt-1 text-xs text-muted-foreground">Applies to {req.scopes?.map((scope) => roles.find((role) => role.id === scope.role_id)?.name ?? "all roles").join(", ") || "not specified"}</p><EvidenceBlock requirement={req} /></>}
             {entry.exception_to && <p className="mt-2 text-xs">Exception to {entry.exception_to} {entry.downgrade_requested ? "· mandatory downgrade requested" : ""}</p>}
           </article>; })}</div>
@@ -505,7 +506,7 @@ export function RequirementsWorkspace({ me, roles, departments }: Props) {
         <p className="text-xs text-muted-foreground">Submitted by {groundTruth.approval.submitted_by} · approved by {groundTruth.approval.decided_by} on {groundTruth.approval.decided_at}{groundTruth.approval.admin_override ? " · audited Admin emergency override" : ""}</p>
         {groundTruth.snapshot.entries.map((item) => <article key={item.entry.requirement_id} className="rounded-md border border-border p-4">
           <div className="flex flex-wrap gap-2"><h3 className="font-semibold">{item.requirement.requirement_code} · {item.requirement.statement}</h3><Status value={item.requirement.mandatory ? "MANDATORY" : "OPTIONAL"} /></div>
-          <p className="mt-1 text-xs text-muted-foreground">{item.requirement.requirement_type} · {item.requirement.category} · Timing {JSON.stringify(item.requirement.timing)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{item.requirement.requirement_type} · {item.requirement.category} · Timing {timingLabel(item.requirement.timing)}</p>
           <p className="mt-1 text-xs text-muted-foreground">Applicability: {item.scopes.map((scope) => roles.find((role) => role.id === scope.role_id)?.name ?? "all roles").join(", ")}</p>
           {item.entry.exception_to && <p className="mt-2 text-sm">Approved role exception to {item.entry.exception_to}{item.entry.downgrade_requested ? " · mandatory downgrade" : ""}</p>}
           {item.sources.map((source, index) => <div key={`${source.version_id}-${index}`} className="mt-3 rounded-md border border-primary/20 bg-primary/5 p-3 text-sm">

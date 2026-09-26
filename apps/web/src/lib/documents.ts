@@ -1,3 +1,5 @@
+import { errorMessage, ProductError } from "@/lib/product";
+
 export type ParseStatus = "UPLOADED" | "PROCESSING" | "PARSED" | "NEEDS_REVIEW" | "FAILED";
 export type ReviewStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" | "SUPERSEDED";
 
@@ -14,6 +16,7 @@ export type DocumentVersion = {
   mime_type?: string;
   size_bytes?: number;
   uploaded_by: string;
+  submitted_by?: string | null;
   created_at: string;
   approved_by?: string | null;
 };
@@ -60,8 +63,7 @@ export function latestVersion(document: CompanyDocument): DocumentVersion | unde
 export async function documentRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/document-gateway/${path}`, { ...init, cache: "no-store" });
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.code ?? "DOCUMENT_REQUEST_FAILED");
+    throw new Error(errorMessage(new ProductError(response.status, "DOCUMENT_REQUEST_FAILED")));
   }
   return response.json() as Promise<T>;
 }

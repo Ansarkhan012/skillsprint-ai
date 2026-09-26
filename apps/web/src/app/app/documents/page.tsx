@@ -21,5 +21,5 @@ export default async function DocumentsPage() {
   return <DocumentsWorkspace initialDocuments={documents} departments={departments}
     canUpload={me.roles.some((role) => role === "ADMIN" || role === "TRAINING_MANAGER")}
     canReview={me.roles.some((role) => role === "ADMIN" || role === "REVIEWER")}
-    isAdmin={me.roles.includes("ADMIN")} />;
+    isAdmin={me.roles.includes("ADMIN")} actorId={me.id} />;
 }

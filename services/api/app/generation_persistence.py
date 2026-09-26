@@ -87,11 +87,14 @@ class GenerationStore(GenerationRepository):
             raise HTTPException(503, "GENERATION_DATA_UNAVAILABLE")
         return result
 
-    async def list_runs(self, token: str, offset: int, limit: int) -> dict:
-        rows = await self.rrm.rows(token, "generation_runs", {
+    async def list_runs(self, token: str, offset: int, limit: int, employee_id: UUID | None = None) -> dict:
+        params = {
             "select": "id,employee_id,created_by,matrix_id,matrix_revision,stage_set_id,stage_set_code,stage_set_version,provider,model,prompt_version,schema_version,status,error_code,created_at,started_at,completed_at",
             "order": "created_at.desc,id.desc", "offset": str(offset), "limit": str(limit + 1),
-        })
+        }
+        if employee_id is not None:
+            params["employee_id"] = f"eq.{employee_id}"
+        rows = await self.rrm.rows(token, "generation_runs", params)
         return {"items": rows[:limit], "offset": offset, "limit": limit, "has_more": len(rows) > limit}
 
     async def detail(self, token: str, run_id: UUID) -> dict:
