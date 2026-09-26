@@ -1,12 +1,17 @@
 # GenAI Structured Output Contract
 
-Status: **PLANNED**. This contract is provider-neutral and intended for Pydantic plus JSON Schema validation. The model returns JSON only; all scores and final verification statuses are computed outside GenAI.
+Phase 5 now independently checks persisted UNVERIFIED output using `python-validator/1.0.0` and `jev/1.0.0`. It never calls GenAI. Findings/JEV/human dispositions are separate immutable records; no output is promoted in the Phase 4 tables. Structured timing that cannot be expressed by onboarding-plan/1.0.0 requires MANUAL_REVIEW. No output-model changes were made for Phase 5.
+
+Status: **Phase 4 structural contract implemented; compact-exact-output recovery pending its additive migration.** Historical Gemini and Groq failed runs remain unchanged. A provider response may be rejected by strict local structural validation; no Phase 4 output is verified. Scores and final decisions belong to independent Phase 5 validation/JEV.
+
+Implementation version: `onboarding-plan/1.0.0` in `services/api/app/generation_output.py`.
+Current prompt version: `phase4d-compact-exact-output/1.0.0` in `services/api/app/generation_prompt.py`; historical prompt pins remain in earlier migrations. The specification factors repeated scalar constraints into shared definitions and marks optional fields with `?`; tests expand it back to the exact Pydantic JSON Schema. This is prompt notation only, not a change to output JSON. The template hash covers the version, specification, mappings, instructions, projection serializer version and byte bounds. Separate hashes pin the immutable full snapshot and unchanged bounded projection. The new reservation pin requires review/manual application of `202609260001_compact_generation_output_contract.sql` before use. Groq's final HTTPX-serialized body is bounded to 24,576 bytes, including escaping and format-retry instructions; overflow fails closed as `GENERATION_PROJECTION_TOO_LARGE`. This internal bound is not a documented provider quota. See `docs/PHASE4D_COMPACT_REQUEST_AUDIT.md` for offline measurements and evidence limits.
 
 ## Envelope
 
 ```json
 {
-  "schema_version": "1.0.0",
+  "schema_version": "onboarding-plan/1.0.0",
   "generation_request_id": "uuid",
   "employee_context": {
     "employee_id": "EMP-001",
@@ -25,7 +30,10 @@ Status: **PLANNED**. This contract is provider-neutral and intended for Pydantic
 }
 ```
 
-`generation_request_id` is supplied by the application and must echo exactly. Employee context is minimized; names and sensitive personal data are unnecessary. Allowed experience values are `BEGINNER`, `INTERMEDIATE`, `ADVANCED`.
+`generation_request_id` is supplied by the application and must echo exactly. Actual
+IDs are UUIDs from the frozen Phase 4A snapshot; symbolic IDs below illustrate only
+the shape. Employee context is minimized; names and sensitive personal data are
+unnecessary. Allowed experience values are `BEGINNER`, `INTERMEDIATE`, `ADVANCED`.
 
 ## Stage and module
 
@@ -64,6 +72,9 @@ Status: **PLANNED**. This contract is provider-neutral and intended for Pydantic
 ```
 
 IDs must be unique within a plan. Stages use configured IDs rather than free-form interpretation. Each mandatory module and every factual generated item requires at least one valid `requirement_id` and `source_ref`. `source_refs` may only use IDs included in the generation evidence pack.
+The strict parser also requires the exact authoritative stage IDs, order, labels and day
+windows. It verifies only the *presence and syntax* of supplied reference IDs and
+source-version/chunk pairs; whether a cited source supports a claim belongs to Phase 5.
 
 ## Child item contracts
 
@@ -77,9 +88,12 @@ IDs must be unique within a plan. Stages use configured IDs rather than free-for
 | Scenario | `scenario_id`, `prompt`, `expected_actions[]`, `success_criteria[]`, `requirement_ids`, `source_refs` |
 | Quiz | `quiz_id`, `question_type`, `question`, `options[]`, `correct_answer_ids[]`, `explanation`, `difficulty`, `requirement_ids`, `source_refs` |
 | Assessment | `assessment_id`, `assessment_type`, `title`, `instructions`, `rubric[]`, `pass_condition`, `requirement_ids`, `source_refs` |
-| Completion criterion | `criterion_id`, `description`, `evidence_type`, `threshold` |
+| Completion criterion | `criterion_id`, `description`, `evidence_type`, `threshold`, `requirement_ids`, `source_refs` |
 
 Quiz `question_type` is `SINGLE_CHOICE`, `MULTIPLE_RESPONSE`, `TRUE_FALSE`, or `SCENARIO`. Options have stable `option_id` and `text`; correctness is represented only through `correct_answer_ids`. A rubric row has `criterion_id`, `criterion`, `weight_percent`, `expected_performance`, and `pass_condition`; weights must total 100.
+Rubric rows also carry their own `requirement_ids` and `source_refs`. Phase 4B
+checks their structure and reference allowlist, not the factual correctness of
+the criterion or the suitability of the score.
 
 ## Explanations and unsupported requests
 
@@ -93,12 +107,26 @@ Allowed reason codes: `NO_APPROVED_SOURCE`, `AMBIGUOUS_SOURCE`, `CONFLICTING_SOU
 
 ## Application-owned metadata
 
-The service wraps validated provider output with `provider`, `model`, `prompt_version_id`, `generation_config`, `rrm_revision_id`, `source_snapshot_id`, timestamps, token/latency metadata, raw-response hash, and retry lineage. The model cannot set JEV status, validation metrics, approval state, audit identity, or policy precedence.
+Phase 4C/4D stores a strict parsed `UNVERIFIED` output with provider/model, prompt/schema versions, template hash, immutable full input snapshot/hash, bounded projection hash, stage-set/version IDs, timestamps, attempt latency/outcome/response hashes, and retry lineage. Raw generated text is not retained by this path. Token usage is not yet supplied by the current provider adapter. The model cannot set JEV status, validation metrics, approval state, audit identity, or policy precedence.
+
+Phase 4B has an in-memory `UNVERIFIED` result. Phase 4C/4D adds
+UNVERIFIED persistence and metadata storage. The Gemini/Groq adapters take backend-only configuration and an
+injected HTTP client; it does not create a client or make a request on import. Its
+JSON-mode response is parsed again by strict local Pydantic validation. Trusted
+system/rule instructions are separate from the user-role JSON data part. Source
+text inside that data part is untrusted even if it contains apparent instructions.
+
+Transient transport/5xx retry is capped at two backoffs per generation. A 429 fails without retry unless the provider supplies a numeric, bounded 0.5–2 second Retry-After; at most one delayed 429 retry is permitted within the same overall retry budget. One separate format/schema
+regeneration is permitted using the unchanged frozen input. Phase 5 findings such as
+missing coverage, unsupported claims, contradiction, timing and dependency errors
+are never silently repaired into a verified result. All errors returned by the
+service are safe application-owned codes; provider exception bodies and secrets are
+not included.
 
 ## Schema rules
 
 - Reject unknown top-level/control fields (`extra="forbid"`).
 - Enforce lengths, enum values, UUID/ID formats, bounded collections, unique IDs, and reference integrity.
-- Reject HTML/scripts, external URLs unless explicitly allowed, and model-emitted secrets/tool directives.
-- Enforce stage/module ordering numerically and prerequisite references acyclically in deterministic validation.
+- Phase 4 rejects malformed JSON, schema-invalid types/fields/enums, mismatched request/employee/stage identity, and unknown or mismatched requirement/source references and locators. Structural error logs contain only bounded allowlisted path/type diagnostics, never generated values.
+- Phase 5 independently checks factual support, coverage, unsafe content, timing/dependencies and JEV outcomes. Phase 4 structural parsing is not a factual approval.
 - Version breaking schema changes with a major version and retain readers for stored historical outputs.

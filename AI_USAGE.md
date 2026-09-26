@@ -179,6 +179,41 @@ Future AI-assisted work must add entries identifying prompts/assistance type, ex
 | Human review status | **Checkpoint pending migration review. Phase 3 is not complete.** Migration not applied; no commit, push or deployment. |
 | Verifying team member | Pending human review |
 
+## Phase 4D bounded generation projection correction
+
+| Field | Value |
+|---|---|
+| Tool | OpenAI Codex |
+| Purpose | Reduce the provider request that reached HTTP 413 without changing authoritative frozen input or deterministic verification boundaries |
+| Files/features affected | Phase 4 prompt/service/API/persistence code, focused generation and SQL-contract tests, new additive bounded-projection migration, Phase 4C/4D implementation notes, this declaration |
+| Modification performed | Added a deterministic bounded projection, separate projection hash and new prompt version; retained full input snapshot/hash and strict UNVERIFIED-only output. Oversized projection fails before provider invocation. Historical migrations/runs were not changed. |
+| Tests performed | Phase 4 focused and full backend results are reported in the task handoff. No live SQL application or provider call was performed. |
+| Human review status | Pending review; new migration not applied. No commit, push, or deployment. |
+| Verifying team member | Pending human review |
+
+## Phase 4D Groq provider integration
+
+| Field | Value |
+|---|---|
+| Tool | OpenAI Codex |
+| Purpose | Add Groq as the active backend-only Phase 4 provider after a successful standalone provider probe |
+| Files/features affected | Generation provider selection/adapter, backend-only configuration example, additive Groq SQL migration, focused tests, Phase 4 implementation notes and this declaration |
+| Modification performed | Preserved Gemini and the existing frozen-context, retry, strict validation and UNVERIFIED-only workflow; added a Groq chat-completion adapter and the minimum SQL provider/model acceptance change. No automatic fallback, Phase 5/JEV, live data change, commit, push or deployment. |
+| Live status | No Groq SkillSprint generation request has been made by Codex. The additive migration requires separate human review/application, followed by backend configuration and live preflight. Historical Gemini FAILED runs are untouched. |
+| Human review status | Pending. |
+
+## Phase 4C final automated and live-evidence audit
+
+| Field | Value |
+|---|---|
+| Tool | OpenAI Codex |
+| Purpose | Audit the applied Phase 4C foundation for lock readiness without new live data or Gemini calls |
+| Files/features affected | `docs/PHASE4C_GENERATION_IMPLEMENTATION.md`, `GENAI_CONTRACT.md`, this declaration; the reviewed Phase 4C migration was staged for later commit without changing its contents |
+| Modification performed | Updated documentation to distinguish human-reported bootstrap and five-role live authorization evidence from unexecuted valid-run lifecycle tests. No application code, schema or live records changed in this audit. |
+| Tests performed | Focused Phase 4A/4B/4C backend: **83 passed**. Full backend: **374 passed**, one existing TestClient deprecation warning, exit 0. Frontend auth/RRM tests: **23 passed**; lint, typecheck and production build passed. Whitespace and scoped high-confidence secret checks passed. |
+| Human review status | **PHASE_4C_READY_TO_LOCK**, not committed or pushed. No real Gemini call; controlled-data lifecycle and cross-record live checks remain unexecuted. |
+| Verifying team member | Pending human lock review |
+
 ## Phase 3A.2 ambiguous-timing manual-review UX correction
 
 | Field | Value |
@@ -228,6 +263,14 @@ Future AI-assisted work must add entries identifying prompts/assistance type, ex
 | Re-audit / limitations | No remaining known Blocker/High in scoped static re-audit. Database execution, timezone RPC behavior, RLS/concurrency and SQL/Python hash parity remain REQUIRED LIVE TEST; no live Supabase results claimed. Evidence presence still requires human semantic review. |
 | Human review status | **Fixes ready for review, not locked.** Migration remains unapplied. No commit, push, deployment or Phase 3A.2 implementation. |
 | Verifying team member | Pending human review |
+
+## Phase 5 independent validator and JEV foundation
+
+Codex implemented deterministic Python validation, versioned findings/JEV, authenticated APIs, immutable evidence/review persistence and an additive unapplied migration. The Phase 4 output model and generation code were not changed. Source timing without a comparable generated timing tuple requires MANUAL_REVIEW; factual prose entailment is not claimed. Tests: 53 focused Phase 5 checks; 474 full backend tests passed, one existing deprecation warning, normal exit 0. Diff and scoped credential-pattern checks passed. No provider request, live validation, database mutation, migration application, frontend build, commit, push or deployment. Human review and live migration/RLS verification remain pending.
+
+## Phase 4D compact exact-output request recovery
+
+Codex inspected the outbound Groq construction and factored repeated output-schema constraints without changing strict output validation or the frozen snapshot/projection. Added a final serialized-body guard, corrected employee mapping prose, created a new prompt pin/additive migration, and added round-trip/size/security contract tests. Offline synthetic 6/8/5 body decreased from 23,392 to 16,644 bytes; exact historical live request size/provider threshold remain unproven. Focused tests: 130 passed; full backend: 421 passed, one existing warning, exit 0. No provider/database calls, migration application, configuration changes, commit or deployment. Pending human review; see `docs/PHASE4D_COMPACT_REQUEST_AUDIT.md`.
 
 ## Login form security correction after interrupted Phase 3A.1 live verification
 

@@ -1,6 +1,8 @@
 # SkillSprint AI - Phase 0 Architecture Blueprint
 
-Status: **PLANNED - NOT IMPLEMENTED**  
+Status: **Phases 0–3 locked; Phase 4 generation implemented; Phase 5 deterministic validation/JEV backend foundation implemented, pending migration and human review.**
+
+Phase 5 reads persisted UNVERIFIED plans with caller JWT/RLS, compares structured fields/references against frozen approved input, and stores immutable validation/JEV evidence through a backend-only finalization RPC. Human review is separate from JEV and Phase 4 status. AI creates; Python verifies; JEV decides; humans control. Timing without a comparable generated timing tuple requires MANUAL_REVIEW. See `VALIDATION_DESIGN.md` and `JEV_DESIGN.md` for implemented scope and limits.
 Source of truth: `docs/SkillSprint AI-Generative AI PowerPlay_SRS.pdf` (SRS v1.0, 52 pages)  
 Constraint: competition-ready build in approximately three days.
 
@@ -21,7 +23,7 @@ flowchart LR
   API --> GEN[GenAI Generation Pipeline]
   API --> VAL[Independent Python Validation]
   API --> JEV[Deterministic JEV]
-  GEN --> GP[Gemini via Provider Adapter]
+  GEN --> GP[Configured Gemini or Groq via Provider Adapter]
   DOC --> DB
   GEN --> DB
   VAL --> DB
@@ -64,9 +66,10 @@ sequenceDiagram
   API->>DB: Immutable approved source/RRM snapshot
   TM->>API: Generate for employee/role
   API->>DB: Resolve active RRM + source snapshot
-  API->>G: System prompt + delimited untrusted excerpts + JSON schema
+  API->>G: Versioned prompt + exact output spec + bounded untrusted projection
   G-->>API: Structured plan JSON
-  API->>DB: Persist generation run and raw/parsed result
+  API->>DB: Persist UNVERIFIED parsed plan + hashes/attempt metadata
+  Note over API,V: Phase 5 only; not invoked by Phase 4 generation
   API->>V: Plan + RRM snapshot + metadata + deterministic rules
   V-->>API: Metrics and validation issues
   API->>J: Validation evidence
@@ -148,9 +151,9 @@ Approval freezes a matrix revision and its source set. A Training Manager may au
 
 ## 9. GenAI pipeline and structured output
 
-`AIProvider.generate(request, schema, config) -> ProviderResult` isolates Gemini. Provider-specific SDK objects do not enter the domain layer. The orchestrator builds a request from a frozen RRM/source snapshot, versioned prompt, and employee context; validates the response against the versioned Pydantic/JSON schema; rejects unknown citations; persists raw response securely plus normalized plan; and invokes validation.
+The provider abstraction isolates Gemini/Groq. Phase 4A freezes the full approved RRM/source/employee/stage snapshot and input hash. Phase 4D derives a deterministic, bounded provider projection and a separate projection hash without dropping applicable requirements, dependencies, timing, source references or stages. The current versioned prompt includes a compact machine-readable output schema derived from `generation_output.py`, explicit employee/stage/locator mappings, and a pinned template hash. Phase 4 parses provider JSON through strict Pydantic, checks request/employee/stage identity and reference integrity, then persists a parsed plan only as `UNVERIFIED`; it records response hashes/size and attempts, not raw response text. An oversized projection fails before a provider call. Phase 5 independently performs factual validation and JEV; Phase 4 never self-verifies.
 
-Generation uses low/controlled randomness, bounded output, provider timeouts, correlation IDs, and no secrets or unnecessary employee data in prompts. Invalid JSON may receive one provider-format repair retry and one targeted regeneration; repair output is still untrusted. Targeted regeneration is restricted to issue/requirement IDs and produces a new revision linked to its parent.
+Generation uses controlled randomness, bounded output/input, provider timeouts, correlation IDs, and no secrets or unnecessary employee data in prompts. Invalid JSON/schema output may receive one format retry; repair output remains untrusted. Genuine transient transport/5xx failures have a bounded retry budget. A 429 does not cause immediate repeated calls: absent a short safe numeric Retry-After it fails closed, and at most one bounded delayed rate-limit retry is allowed. No automatic provider fallback is implemented.
 
 The contract is defined in `GENAI_CONTRACT.md`. No regex/prose extraction is used for business fields.
 

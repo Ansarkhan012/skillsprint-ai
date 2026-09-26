@@ -14,6 +14,8 @@ from .security import current_principal, require_roles
 from .supabase import SupabaseGateway, get_gateway
 from .documents import router as documents_router
 from .rrm import router as rrm_router
+from .generation_api import router as generation_router
+from .validation_api import router as validation_router
 from .upload_limit import UploadRequestLimit
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
@@ -51,11 +53,13 @@ app.add_middleware(
     allow_origins=[settings.web_origin],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
 )
 register_error_handlers(app)
 app.include_router(documents_router)
 app.include_router(rrm_router)
+app.include_router(generation_router)
+app.include_router(validation_router)
 
 
 @app.get("/api/v1/health", response_model=HealthResponse)

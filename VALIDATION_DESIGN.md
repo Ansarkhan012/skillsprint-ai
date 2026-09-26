@@ -1,6 +1,32 @@
 # Independent Python Validation Design
 
-Status: **PLANNED**. Validators are deterministic Python components with no LLM/API calls. Ground truth is the approved RRM snapshot, approved source metadata/chunks, versioned rules, and the structured plan.
+Status: **Phase 5 backend foundation implemented; pending migration and human review.** AI creates. Python verifies. JEV decides. Human controls. Checks compare structured attributes and references, not exact natural-language wording or semantic entailment.
+
+## Implemented: python-validator/1.0.0
+
+Pure Python `plan_validator.py`/`jev.py` check strict schema, request/employee identity, frozen role/department/location/experience applicability, mandatory module coverage, requirement-to-source/version/chunk/canonical-locator support, fixed stage identity/order/windows, mandatory/priority consistency, duplicates, dependencies/order/cycles and insufficient-information review. Every grounded child/rubric is checked. Consistent repetition is a warning; conflicting attributes block. Work mode is absent from the existing context and is not inferred.
+
+Timing limitation: the output has stage windows/due-stage references but no per-module trigger/relation/value/unit/calendar tuple. Changed fixed windows produce TIMING_MISMATCH. Any source timing (structured or ambiguous) produces TIMING_UNRESOLVED/MANUAL_REVIEW. The current real Phase 4D deadline fixture cannot be VERIFIED. The 6/8/5 VERIFIED test fixture uses NOT_SPECIFIED timing; structured/ambiguous cases prove review. Phase 4 schema and live data are unchanged.
+
+Entry requires a persisted UNVERIFIED plan, completed UNVERIFIED generation run, matching content/full-input hashes, projection/template provenance and active authorized actor. Current preflight rechecks authoritative state/source eligibility; outage aborts and stale input requires review. Comparison normalizes only the `as_of` date after current eligibility was checked. No document reparsing occurs.
+
+## Persistence / API / human control
+
+Unapplied migration `202609260002_python_validation_jev.sql` adds immutable validation_runs, validation_findings, jev_decisions and plan_review_actions. Linkage is plan → validation → finding → requirement → document/version/chunk/locator. Findings contain no source excerpts; unknown requirement IDs are recordable without an FK so invalid references remain auditable.
+
+Caller JWT/RLS protects reads: Admin/Reviewer read all permitted validation results; Training Manager reads only their generation runs; Manager/Employee are denied. Admin/owning Training Manager may invoke validation. Direct writes are revoked for every role. Only the server-only trusted finalization RPC accepts computed Python results, following document-processing's existing service credential pattern; it rechecks actor/ownership and hashes. No browser JWT can forge findings/JEV. No service-role read shortcut is used.
+
+Atomic persistence includes findings, JEV and audit. Unique identity is plan ID + validator version + content/input/projection hashes. Concurrent requests serialize per plan. Same evidence replays the same ID; changed evidence for the same identity conflicts without overwriting history. Timestamps are excluded from result hashing. Verified persistence and approval recheck database state under locks. Findings use counted bounded pages; incomplete retrieval fails closed.
+
+Routes: POST `/api/v1/generated-plans/{plan_id}/validate`; GET `/api/v1/validation-runs/{validation_id}`; GET `/api/v1/generated-plans/{plan_id}/validation`; POST `/api/v1/validation-runs/{validation_id}/review`.
+
+Reviewer/Admin actions: APPROVE, REJECT, REGENERATE, OVERRIDE. Meaningful reasons are required (1–2000 characters). APPROVE requires verified JEV plus current input. OVERRIDE is Admin-only and records a distinct disposition without changing JEV. Creator/employee self-review is denied even with multiple roles. Actions/reasons are immutable and audited. REGENERATE is a request only; publication/assignment/provider execution are outside this foundation. Phase 4 plans remain UNVERIFIED.
+
+## Earlier design backlog (not additional implementation claims)
+
+Automated foundation verification: 53 focused Phase 5 tests (pure validator/JEV, API/RBAC, repository and SQL contracts); full backend 474 passed, one existing warning, exit 0. Migration static verdict: SAFE_TO_APPLY after human review, unapplied. No live RLS/transaction/concurrency claim is made; provider execution and live validation were not performed. Diff/whitespace and scoped secret-pattern checks passed.
+
+The following original design includes later work. General prose entailment, quiz-answer factual correctness, artifact-specific requirements absent from the frozen model, pedagogical quality and natural-language contradictions remain human responsibilities/future contracts. VERIFIED means the implemented structured checks passed, never autonomous publication or proof of every sentence.
 
 ## Common output
 

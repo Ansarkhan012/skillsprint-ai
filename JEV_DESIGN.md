@@ -1,6 +1,10 @@
 # JEV Deterministic Decision Engine
 
-Status: **PLANNED**. JEV is a pure, versioned rules engine. It has no LLM/provider dependency and cannot alter validation evidence.
+Status: **Phase 5 foundation implemented: jev/1.0.0; pending migration and human review.** JEV is pure Python and cannot alter evidence. The authoritative table is `services/api/app/jev.py`.
+
+Implemented precedence: CONTRADICTORY (timing/structured contradiction/dependency errors) → UNSUPPORTED (unknown requirements or missing/invalid grounding) → MANUAL_REVIEW (unresolved timing, stale data, applicability, structure or invalid duplication) → INCOMPLETE (missing mandatory coverage). First matching blocking row wins. Only consistent DUPLICATE_REQUIREMENT is an explicitly allowed warning. VERIFIED_WITH_WARNING/VERIFIED require positive structural/current-input invariants, nonzero mandatory count and complete grounded coverage, with no blocker. No scores or AI confidence decide status.
+
+Human disposition stays separate. Approval requires verified JEV and current data; Admin override records reason/actor and retains original JEV. Phase 4 plans stay UNVERIFIED. Regeneration is only a recorded request. The conceptual table below is design history; its retry/reporting/publication features are not additional implementation claims.
 
 ## Input and output
 
