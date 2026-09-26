@@ -99,7 +99,11 @@ def _reject_constant(_value: str):
 def parse_plan(text: str, request_id: UUID, snapshot: GenerationInputSnapshot) -> OnboardingPlan:
     if not text or not text.strip():
         raise StructuralFailure("EMPTY_RESPONSE")
-    if len(text.encode("utf-8")) > 2_000_000:
+    try:
+        response_bytes = text.encode("utf-8")
+    except UnicodeError:
+        raise StructuralFailure("MALFORMED_JSON") from None
+    if len(response_bytes) > 2_000_000:
         raise StructuralFailure("RESPONSE_TOO_LARGE")
     try:
         decoded = json.loads(text, object_pairs_hook=_unique_pairs, parse_constant=_reject_constant)
@@ -220,11 +224,17 @@ async def generate_unverified(
                 return GenerationResult(status="FAILED", error_code=code, provider_calls=calls)
             except StructuralFailure as exc:
                 if on_attempt:
+                    # Invalid Unicode has no valid UTF-8 fingerprint. Do not repair
+                    # the response or lose the failure attempt while hashing it.
+                    try:
+                        response_bytes = response.text.encode("utf-8")
+                    except UnicodeError:
+                        response_bytes = None
                     await on_attempt(AttemptTelemetry(
                         attempt_type=attempt_type, provider_outcome="RESPONSE",
                         latency_ms=min(int((perf_counter() - started) * 1000), 600000),
-                        response_hash=sha256(response.text.encode("utf-8")).hexdigest(),
-                        response_size=len(response.text.encode("utf-8")), parse_outcome="SCHEMA_INVALID",
+                        response_hash=sha256(response_bytes).hexdigest() if response_bytes is not None else None,
+                        response_size=len(response_bytes) if response_bytes is not None else None, parse_outcome="SCHEMA_INVALID",
                         error_code=exc.code))
                 if format_attempt == 0 and exc.code in {"EMPTY_RESPONSE", "MALFORMED_JSON", "SCHEMA_INVALID",
                                                        "TRUNCATED_RESPONSE", "RESPONSE_TOO_LARGE"}:

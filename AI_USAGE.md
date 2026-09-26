@@ -264,6 +264,19 @@ Future AI-assisted work must add entries identifying prompts/assistance type, ex
 | Human review status | **Fixes ready for review, not locked.** Migration remains unapplied. No commit, push, deployment or Phase 3A.2 implementation. |
 | Verifying team member | Pending human review |
 
+## Phase 7 offline hidden evaluation
+
+Codex audited existing coverage and added deterministic TEST/EVALUATION factories
+and 43 adversarial checks. Fixed one reproduced UnicodeEncodeError path in
+generation response parsing/failed-attempt telemetry; strict schema, retry limits,
+prompt/provider pins and historical records are unchanged. Relevant regressions:
+517 passed; full backend: 526 passed, one existing warning, normal exit0. Evaluation
+report records 24 PASS scenarios and one LIMITED requirement-level timing case,
+SQL/static versus fixture evidence, and unproven competition dataset counts.
+No external provider call, live database access/mutation, migration, frontend
+change, commit, push or deployment. Pending human review. See
+`docs/PHASE7_HIDDEN_EVALUATION.md` for exact scope and limitations.
+
 ## Phase 6 authenticated product experience
 
 Codex implemented real-data dashboard/reporting, employee and department/job-role
