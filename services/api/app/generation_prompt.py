@@ -146,7 +146,14 @@ _UNCAPPED_TEXT = frozenset({"locator"})
 _COMPACT_ARRAYS = {"learning_objectives": "generation_max_objectives_per_module",
                    "tasks": "generation_max_tasks_per_module",
                    "checklist_items": "generation_max_checklist_per_module",
-                   "quizzes": "generation_max_quiz_per_module"}
+                   "quizzes": "generation_max_quiz_per_module",
+                   # Optional module lists: the validator/JEV only check them when present,
+                   # so 0 (forced empty) is allowed.
+                   "key_concepts": "generation_max_key_concepts_per_module",
+                   "activities": "generation_max_activities_per_module",
+                   "scenarios": "generation_max_scenarios_per_module",
+                   "assessments": "generation_max_assessments_per_module",
+                   "completion_criteria": "generation_max_completion_criteria_per_module"}
 
 
 class GenerationLimits(BaseSettings):
@@ -161,6 +168,13 @@ class GenerationLimits(BaseSettings):
     generation_max_tasks_per_module: int | None = Field(default=None, ge=1, le=100)
     generation_max_checklist_per_module: int | None = Field(default=None, ge=1, le=100)
     generation_max_quiz_per_module: int | None = Field(default=None, ge=1, le=100)
+    generation_max_key_concepts_per_module: int | None = Field(default=None, ge=0, le=100)
+    generation_max_activities_per_module: int | None = Field(default=None, ge=0, le=100)
+    generation_max_scenarios_per_module: int | None = Field(default=None, ge=0, le=100)
+    generation_max_assessments_per_module: int | None = Field(default=None, ge=0, le=100)
+    generation_max_completion_criteria_per_module: int | None = Field(default=None, ge=0, le=100)
+    # Rows per assessment rubric; at least 1 because a present assessment needs a rubric.
+    generation_max_rubric_rows: int | None = Field(default=None, ge=1, le=20)
     generation_max_text_length: int | None = Field(default=None, ge=20, le=4000)
 
     @field_validator("*", mode="before")
@@ -176,6 +190,8 @@ def capped_provider_schema(limits: GenerationLimits) -> dict:
     for field, setting in _COMPACT_ARRAYS.items():
         if getattr(limits, setting) is not None:
             module[field]["maxItems"] = getattr(limits, setting)
+    if limits.generation_max_rubric_rows is not None:
+        schema["$defs"]["Assessment"]["properties"]["rubric"]["maxItems"] = limits.generation_max_rubric_rows
     if limits.generation_max_text_length is not None:
         original = _compact_schema(OnboardingPlan.model_json_schema())
 

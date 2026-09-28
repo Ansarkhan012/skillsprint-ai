@@ -584,3 +584,30 @@ def test_adapters_send_the_capped_schema_when_configured(monkeypatch):
             await GeminiProvider(client, ProviderConfig(model="mock-model", api_key="k")).generate(build_prompt(ready().snapshot))
     asyncio.run(scenario())
     assert bodies[0]["generationConfig"]["responseJsonSchema"]["$defs"]["Module"]["properties"]["tasks"]["maxItems"] == 1
+
+
+def test_optional_module_lists_can_be_forced_empty_and_empty_output_still_validates(monkeypatch):
+    from app.generation_prompt import current_provider_schema
+    optional = {"KEY_CONCEPTS": "key_concepts", "ACTIVITIES": "activities", "SCENARIOS": "scenarios",
+                "ASSESSMENTS": "assessments", "COMPLETION_CRITERIA": "completion_criteria"}
+    for env in optional:
+        monkeypatch.setenv(f"GENERATION_MAX_{env}_PER_MODULE", "0")
+    monkeypatch.setenv("GENERATION_MAX_RUBRIC_ROWS", "1")
+    schema = current_provider_schema()
+    module = schema["$defs"]["Module"]["properties"]
+    assert all(module[field]["maxItems"] == 0 and "minItems" not in module[field] for field in optional.values())
+    assert schema["$defs"]["Assessment"]["properties"]["rubric"]["maxItems"] == 1
+    # Required learning lists keep minItems 1 regardless.
+    assert all(module[f]["minItems"] == 1 for f in ("learning_objectives", "tasks", "checklist_items", "quizzes"))
+    # Output with those lists empty is still a valid plan for parse_plan.
+    output = complete_output()
+    for stage in output["plan"]["stages"]:
+        for m in stage["modules"]:
+            for field in optional.values():
+                m[field] = []
+    plan = parse(output)
+    assert all(not getattr(m, f) for s in plan.plan.stages for m in s.modules for f in optional.values())
+    monkeypatch.setenv("GENERATION_MAX_RUBRIC_ROWS", "0")
+    from app.generation_prompt import GenerationLimits
+    with pytest.raises(ValueError):
+        GenerationLimits()
