@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from .generation_context import input_hash
 from .generation_models import GenerationInputSnapshot, PreflightResult
 from .generation_output import OnboardingPlan
-from .generation_prompt import build_prompt
+from .generation_prompt import SOURCE_KEYS_PROMPT_VERSION, SourceKey, build_prompt, source_key_map
 from .generation_provider import GenerationProvider, ProviderFailure
 from .rrm_rules import canonical_json
 
@@ -102,6 +102,62 @@ def _unique_pairs(pairs: list[tuple[str, object]]) -> dict:
 
 def _reject_constant(_value: str):
     raise StructuralFailure("MALFORMED_JSON")
+
+
+def expand_source_keys(text: str, keys: dict[str, SourceKey]) -> str:
+    """Replace S# keys with the frozen {document_version_id, chunk_id, locator}, before parse_plan.
+
+    Never repairs: an unknown key, or a key that is not evidence for any of the item's own
+    requirement_ids, fails as SCHEMA_INVALID with sanitized path/type diagnostics. Any
+    other malformed shape is left untouched for parse_plan to reject as it does today.
+    """
+    if not text or not text.strip():
+        return text
+    try:
+        decoded = json.loads(text, object_pairs_hook=_unique_pairs, parse_constant=_reject_constant)
+    except (ValueError, TypeError, RecursionError):
+        return text
+    problems: list[dict[str, object]] = []
+
+    def safe(path: list) -> tuple:
+        return tuple(part if isinstance(part, int) and 0 <= part <= 100
+                     else part if isinstance(part, str) and part in _SAFE_FIELD_NAMES
+                     else "unknown_field" for part in path[:8])
+
+    def walk(node: object, path: list) -> None:
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                walk(item, path + [index])
+            return
+        if not isinstance(node, dict):
+            return
+        refs = node.get("source_refs")
+        if isinstance(refs, list):
+            owners = node.get("requirement_ids")
+            owners = {str(item).lower() for item in owners if isinstance(item, str)} \
+                if isinstance(owners, list) else set()
+            expanded = []
+            for index, ref in enumerate(refs):
+                item = keys.get(ref) if isinstance(ref, str) else None
+                if item is None:
+                    problems.append({"loc": safe(path + ["source_refs", index]), "type": "unknown_source_key"})
+                elif not item.requirement_ids & owners:
+                    problems.append({"loc": safe(path + ["source_refs", index]),
+                                     "type": "source_key_wrong_requirement"})
+                else:
+                    expanded.append({"document_version_id": item.document_version_id,
+                                     "chunk_id": item.chunk_id, "locator": item.locator})
+            node["source_refs"] = expanded
+        for name, value in node.items():
+            if name != "source_refs":
+                walk(value, path + [name])
+
+    walk(decoded, [])
+    if problems:
+        diagnostics = tuple(problems[:5])
+        _LOG.warning("generation_source_key_invalid diagnostics=%s", diagnostics)
+        raise StructuralFailure("SCHEMA_INVALID", diagnostics)
+    return json.dumps(decoded, ensure_ascii=False)
 
 
 def parse_plan(text: str, request_id: UUID, snapshot: GenerationInputSnapshot) -> OnboardingPlan:
@@ -191,14 +247,18 @@ async def generate_unverified(
     preflight: PreflightResult, request_id: UUID, provider: GenerationProvider,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     on_attempt: Callable[[AttemptTelemetry], Awaitable[None]] | None = None,
+    source_keys: bool | None = None,
 ) -> GenerationResult:
+    """source_keys=None reads GENERATION_SOURCE_KEYS; the API passes the reserved prompt's choice."""
     if preflight.status != "READY" or preflight.snapshot is None or preflight.input_hash is None:
         return GenerationResult(status="BLOCKED", error_code=preflight.blocker_codes[0]
                                 if preflight.blocker_codes else "PREFLIGHT_BLOCKED")
     snapshot = preflight.snapshot
     if input_hash(snapshot) != preflight.input_hash:
         return GenerationResult(status="BLOCKED", error_code="INPUT_HASH_MISMATCH")
-    prompt = build_prompt(snapshot, request_id)
+    prompt = build_prompt(snapshot, request_id, source_keys)
+    # Derived from the same frozen snapshot as the prompt's evidence table; never live data.
+    keys = source_key_map(snapshot) if prompt.prompt_version == SOURCE_KEYS_PROMPT_VERSION else None
     if not prompt.within_budget:
         return GenerationResult(status="FAILED", error_code="GENERATION_PROJECTION_TOO_LARGE",
                                 input_hash=preflight.input_hash, prompt_version=prompt.prompt_version,
@@ -227,7 +287,8 @@ async def generate_unverified(
                 if response.finish_reason != "STOP":
                     raise StructuralFailure("TRUNCATED_RESPONSE" if response.finish_reason == "MAX_TOKENS"
                                             else "PROVIDER_RESPONSE_REJECTED")
-                plan = parse_plan(response.text, request_id, snapshot)
+                text = expand_source_keys(response.text, keys) if keys is not None else response.text
+                plan = parse_plan(text, request_id, snapshot)
             except ProviderFailure as exc:
                 code = exc.code if exc.code in SAFE_PROVIDER_ERRORS else "PROVIDER_UNAVAILABLE"
                 if on_attempt:

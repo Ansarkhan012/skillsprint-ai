@@ -160,7 +160,8 @@ class GeminiProvider:
         encoded = httpx.Request("POST", "https://invalid.local", json=payload).content
         if not prompt.within_budget or len(encoded) > MAX_PROVIDER_REQUEST_BYTES:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
-        payload["generationConfig"]["responseJsonSchema"] = current_provider_schema()
+        # Gemini rejects `pattern`, so source keys are sent without it (Python still checks them).
+        payload["generationConfig"]["responseJsonSchema"] = current_provider_schema(prompt.prompt_version, key_pattern=False)
         encoded = httpx.Request("POST", "https://invalid.local", json=payload).content
         response = await post_with_deadline(
             self.client, f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.model}:generateContent",
@@ -236,7 +237,7 @@ class GroqProvider:
         if not prompt.within_budget or len(encoded) > MAX_PROVIDER_REQUEST_BYTES:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
         encoded = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions",
-                                json={**payload, "response_format": json_schema_response_format(current_provider_schema())}).content
+                                json={**payload, "response_format": json_schema_response_format(current_provider_schema(prompt.prompt_version))}).content
         response = await post_with_deadline(
             self.client, "https://api.groq.com/openai/v1/chat/completions",
             deadline_seconds=self.config.timeout_seconds,

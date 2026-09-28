@@ -213,12 +213,119 @@ def capped_provider_schema(limits: GenerationLimits) -> dict:
     return schema
 
 
-def current_provider_schema() -> dict:
-    """Schema for the next provider request; re-reads .env like the provider settings."""
+def current_provider_schema(prompt_version: str | None = None, *, key_pattern: bool = True) -> dict:
+    """Schema for the next provider request; re-reads .env like the provider settings.
+
+    Only the source-keys prompt (3.0.0) changes source_refs; every other version gets
+    exactly today's schema object.
+    """
     limits = GenerationLimits()
     if all(getattr(limits, name) is None for name in GenerationLimits.model_fields):
-        return PROVIDER_OUTPUT_SCHEMA
-    return capped_provider_schema(limits)
+        schema = PROVIDER_OUTPUT_SCHEMA
+    else:
+        schema = capped_provider_schema(limits)
+    if prompt_version == SOURCE_KEYS_PROMPT_VERSION:
+        return source_key_provider_schema(schema, key_pattern=key_pattern)
+    return schema
+
+
+# --- Short source keys (GENERATION_SOURCE_KEYS=true only) -----------------------------
+# The model cites S1, S2, ... from a per-plan evidence table instead of copying
+# {document_version_id, chunk_id, locator}. generation_service expands the keys back
+# from the frozen snapshot before parse_plan, so OnboardingPlan, the validator and
+# persistence see exactly today's source references.
+SOURCE_KEYS_PROMPT_VERSION = "phase4d-compact-context/3.0.0"
+SOURCE_KEYS_PROJECTION_VERSION = "generation-projection/3.0.0"
+SOURCE_KEY_PATTERN = r"^S[0-9]+$"
+SOURCE_KEY_EXCERPT_CHARS = 100
+
+
+class SourceKeySettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    generation_source_keys: bool = False
+
+    @field_validator("generation_source_keys", mode="before")
+    @classmethod
+    def blank_is_false(cls, value):
+        return False if isinstance(value, str) and not value.strip() else value
+
+
+def source_keys_enabled() -> bool:
+    """Re-reads .env per request, like the provider settings and compact caps."""
+    return SourceKeySettings().generation_source_keys
+
+
+class SourceKey(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    key: str
+    document_label: str
+    document_version_id: str
+    chunk_id: str
+    locator: str
+    requirement_ids: frozenset[str]
+    section: str
+    excerpt: str
+
+
+def _section(locator: dict) -> str:
+    for name in ("section_path", "heading", "section"):
+        value = locator.get(name)
+        if isinstance(value, list) and value:
+            return " > ".join(str(part) for part in value)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    parts = [f"{name} {locator[name]}" for name in ("page", "paragraph", "table", "row")
+             if isinstance(locator.get(name), int)]
+    return ", ".join(parts) or str(locator.get("kind", "document"))
+
+
+def source_key_map(snapshot: GenerationInputSnapshot) -> dict[str, SourceKey]:
+    """Deterministic S#/D# labels derived only from the frozen snapshot.
+
+    D# follows sorted document_version_id; S# follows requirement then evidence order,
+    one key per distinct (document_version_id, chunk_id, locator) across all documents.
+    """
+    documents = sorted({str(ref.document_version_id) for req in snapshot.requirements for ref in req.evidence})
+    labels = {version: "D" + str(index) for index, version in enumerate(documents, 1)}
+    by_source: dict[tuple[str, str, str], dict] = {}
+    for req in snapshot.requirements:
+        for ref in req.evidence:
+            identity = (str(ref.document_version_id), str(ref.chunk_id), canonical_json(ref.locator))
+            if identity not in by_source:
+                by_source[identity] = {
+                    "key": "S" + str(len(by_source) + 1), "document_label": labels[identity[0]],
+                    "document_version_id": identity[0], "chunk_id": identity[1], "locator": identity[2],
+                    "requirement_ids": set(), "section": _section(ref.locator),
+                    "excerpt": " ".join(ref.excerpt.split())[:SOURCE_KEY_EXCERPT_CHARS]}
+            by_source[identity]["requirement_ids"].add(str(req.revision_id))
+    return {item["key"]: SourceKey(**{**item, "requirement_ids": frozenset(item["requirement_ids"])})
+            for item in by_source.values()}
+
+
+def source_key_provider_schema(schema: dict, *, key_pattern: bool = True) -> dict:
+    """Copy of the provider schema with every source_refs as array[string], minItems 1.
+
+    key_pattern=False for direct Gemini, which rejects `pattern`; Python expansion still
+    rejects any key that is not in the frozen evidence map.
+    """
+    schema = json.loads(json.dumps(schema))
+    items = {"type": "string", "pattern": SOURCE_KEY_PATTERN} if key_pattern else {"type": "string"}
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            properties = node.get("properties")
+            if isinstance(properties, dict) and "source_refs" in properties:
+                properties["source_refs"] = {"type": "array", "items": dict(items), "minItems": 1}
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(schema)
+    if '"#/$defs/SourceRef"' not in json.dumps(schema):
+        schema["$defs"].pop("SourceRef", None)
+    return schema
 OUTPUT_SPEC = canonical_json(compact_output_contract())
 OUTPUT_MAPPING = (
     "Copy projection.employee employee_id,role_id,department_id,location_code,joining_date to employee_context; "
@@ -234,6 +341,25 @@ OUTPUT_MAPPING = (
     "Use concise prose and only useful optional learning elements."
 )
 PROVIDER_RULES = RULES + "\noutput_spec=" + OUTPUT_SPEC + "\noutput_mapping=" + OUTPUT_MAPPING
+
+
+def source_key_output_contract() -> dict:
+    """The compact contract with SourceRef as an evidence-key string instead of an object."""
+    contract = compact_output_contract()
+    contract["objects"].pop("SourceRef")
+    contract["scalars"]["SourceRef"] = {"type": "string", "pattern": SOURCE_KEY_PATTERN}
+    return contract
+
+
+SOURCE_KEYS_OUTPUT_SPEC = canonical_json(source_key_output_contract())
+_SOURCE_REFS_MAPPING = ("source_refs: copy matching document_version_id,chunk_id,locator exactly; "
+                        "locator is canonical sorted-key compact JSON. ")
+assert _SOURCE_REFS_MAPPING in OUTPUT_MAPPING
+SOURCE_KEYS_OUTPUT_MAPPING = OUTPUT_MAPPING.replace(_SOURCE_REFS_MAPPING, (
+    "source_refs: list evidence keys (e.g. S1) exactly as given in evidence; use only keys listed in "
+    "source_keys of that item's own requirement_ids; never invent, renumber or reuse keys from other requirements. "))
+SOURCE_KEYS_PROVIDER_RULES = (RULES + "\noutput_spec=" + SOURCE_KEYS_OUTPUT_SPEC
+                              + "\noutput_mapping=" + SOURCE_KEYS_OUTPUT_MAPPING)
 
 
 class PromptPack(BaseModel):
@@ -253,12 +379,20 @@ class PromptPack(BaseModel):
     untrusted_data: str
 
 
-def template_hash() -> str:
-    return sha256((PROMPT_VERSION + "\n" + SCHEMA_VERSION + "\n" + SYSTEM + "\n" + PROVIDER_RULES
-                   + "\n" + FORMAT_RETRY_RULE + "\n" + PROJECTION_VERSION
+def _template_hash(prompt_version: str, rules: str, projection_version: str) -> str:
+    return sha256((prompt_version + "\n" + SCHEMA_VERSION + "\n" + SYSTEM + "\n" + rules
+                   + "\n" + FORMAT_RETRY_RULE + "\n" + projection_version
                    + "\n" + str(MAX_PROJECTION_BYTES) + "\n"
                    + str(MAX_PROVIDER_INPUT_BYTES) + "\n"
                    + str(MAX_PROVIDER_REQUEST_BYTES)).encode("utf-8")).hexdigest()
+
+
+def template_hash() -> str:
+    return _template_hash(PROMPT_VERSION, PROVIDER_RULES, PROJECTION_VERSION)
+
+
+def source_keys_template_hash() -> str:
+    return _template_hash(SOURCE_KEYS_PROMPT_VERSION, SOURCE_KEYS_PROVIDER_RULES, SOURCE_KEYS_PROJECTION_VERSION)
 
 
 def generation_projection(snapshot: GenerationInputSnapshot) -> dict:
@@ -297,22 +431,45 @@ def generation_projection(snapshot: GenerationInputSnapshot) -> dict:
     }
 
 
-def build_prompt(snapshot: GenerationInputSnapshot, request_id: UUID | None = None) -> PromptPack:
+def source_key_projection(snapshot: GenerationInputSnapshot, keys: dict[str, SourceKey]) -> dict:
+    """The 2.0.0 projection with per-requirement source_keys and one shared evidence table."""
+    projection = generation_projection(snapshot)
+    projection["projection_version"] = SOURCE_KEYS_PROJECTION_VERSION
+    by_source = {(item.document_version_id, item.chunk_id, item.locator): key for key, item in keys.items()}
+    for requirement in projection["requirements"]:
+        requirement["source_keys"] = [by_source[(ref["document_version_id"], ref["chunk_id"], ref["locator"])]
+                                      for ref in requirement.pop("source_refs")]
+    projection["evidence"] = [f"{key} -> {item.document_label} | {item.section} | {item.excerpt}"
+                              for key, item in keys.items()]
+    return projection
+
+
+def build_prompt(snapshot: GenerationInputSnapshot, request_id: UUID | None = None,
+                 source_keys: bool | None = None) -> PromptPack:
+    """source_keys=None reads GENERATION_SOURCE_KEYS; false keeps the 2.0.0 prompt byte-for-byte."""
+    if source_keys is None:
+        source_keys = source_keys_enabled()
     # Escape markup sentinels inside source text; provider role separation is the primary boundary.
     projection = generation_projection(snapshot)
+    # Locator length is checked on the frozen references in both modes: keys expand to them.
+    locators_fit = all(len(ref["locator"]) <= 240 for req in projection["requirements"]
+                       for ref in req["source_refs"])
+    version, rules, template = PROMPT_VERSION, PROVIDER_RULES, template_hash()
+    if source_keys:
+        projection = source_key_projection(snapshot, source_key_map(snapshot))
+        version, rules, template = (SOURCE_KEYS_PROMPT_VERSION, SOURCE_KEYS_PROVIDER_RULES,
+                                    source_keys_template_hash())
     raw = canonical_json(projection)
     data = raw.replace("<", "\\u003c").replace(">", "\\u003e")
     size = len(data.encode("utf-8"))
     untrusted_data = (("generation_request_id=" + str(request_id) + "\n") if request_id else "") + (
         "<untrusted_generation_data type=\"application/json\">\n" + data
         + "\n</untrusted_generation_data>")
-    system_bytes = len((SYSTEM + "\n" + PROVIDER_RULES).encode("utf-8"))
+    system_bytes = len((SYSTEM + "\n" + rules).encode("utf-8"))
     user_bytes = len(untrusted_data.encode("utf-8"))
     total_bytes = system_bytes + user_bytes
-    locators_fit = all(len(ref["locator"]) <= 240 for req in projection["requirements"]
-                       for ref in req["source_refs"])
-    return PromptPack(prompt_version=PROMPT_VERSION, schema_version=SCHEMA_VERSION,
-                      template_hash=template_hash(), context_hash=input_hash(snapshot),
+    return PromptPack(prompt_version=version, schema_version=SCHEMA_VERSION,
+                      template_hash=template, context_hash=input_hash(snapshot),
                       projection_hash=sha256(raw.encode("utf-8")).hexdigest(),
                       projection_bytes=size,
                       system_message_bytes=system_bytes, user_message_bytes=user_bytes,
@@ -320,4 +477,4 @@ def build_prompt(snapshot: GenerationInputSnapshot, request_id: UUID | None = No
                       estimated_input_tokens=(total_bytes + 3) // 4,
                       within_budget=size <= MAX_PROJECTION_BYTES and total_bytes <= MAX_PROVIDER_INPUT_BYTES
                       and locators_fit,
-                      system=SYSTEM, rules=PROVIDER_RULES, untrusted_data=untrusted_data)
+                      system=SYSTEM, rules=rules, untrusted_data=untrusted_data)

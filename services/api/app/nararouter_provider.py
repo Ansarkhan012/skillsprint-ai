@@ -150,7 +150,7 @@ class NaraRouterProvider:
         if not prompt.within_budget or len(encoded) > MAX_PROVIDER_REQUEST_BYTES:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
         encoded = httpx.Request("POST", url, json={
-            **payload, "response_format": json_schema_response_format(current_provider_schema())}).content
+            **payload, "response_format": json_schema_response_format(current_provider_schema(prompt.prompt_version))}).content
         started = perf_counter()
         response = await post_with_deadline(self.client, url, deadline_seconds=self.config.timeout_seconds,
             content=encoded, follow_redirects=False,

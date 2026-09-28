@@ -14,3 +14,5 @@ for _name in ("GENERATION_MAX_OBJECTIVES_PER_MODULE", "GENERATION_MAX_TASKS_PER_
               "GENERATION_MAX_COMPLETION_CRITERIA_PER_MODULE", "GENERATION_MAX_RUBRIC_ROWS",
               "GENERATION_MAX_TEXT_LENGTH"):
     os.environ[_name] = ""
+# Short source keys are opt-in; tests default to today's 2.0.0 prompt regardless of .env.
+os.environ["GENERATION_SOURCE_KEYS"] = "false"
