@@ -9,8 +9,8 @@ import httpx
 from pydantic import ConfigDict, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .generation_prompt import FORMAT_RETRY_RULE, MAX_PROVIDER_REQUEST_BYTES, PromptPack
-from .generation_provider import (JSON_SCHEMA_RESPONSE_FORMAT, ProviderConfig, ProviderFailure,
+from .generation_prompt import FORMAT_RETRY_RULE, MAX_PROVIDER_REQUEST_BYTES, PromptPack, current_provider_schema
+from .generation_provider import (ProviderConfig, ProviderFailure, json_schema_response_format,
                                   ProviderResult, ProviderUsage, _bounded_retry_after, post_with_deadline)
 
 
@@ -150,7 +150,7 @@ class NaraRouterProvider:
         if not prompt.within_budget or len(encoded) > MAX_PROVIDER_REQUEST_BYTES:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
         encoded = httpx.Request("POST", url, json={
-            **payload, "response_format": JSON_SCHEMA_RESPONSE_FORMAT}).content
+            **payload, "response_format": json_schema_response_format(current_provider_schema())}).content
         started = perf_counter()
         response = await post_with_deadline(self.client, url, deadline_seconds=self.config.timeout_seconds,
             content=encoded, follow_redirects=False,

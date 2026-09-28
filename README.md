@@ -61,6 +61,8 @@ npm install
 
    `NARAROUTER_TIMEOUT_SECONDS` (max 290, default 290) is a **total** deadline per provider call, below the 300 s gateway/Vercel request limit. Overruns fail with `PROVIDER_DEADLINE_EXCEEDED` and are not retried. A whole run is capped at 295 s: a retry happens only if it could still finish within that, so one long attempt runs at most. See Limitations.
 
+   **Compact generation (optional).** `GENERATION_MAX_OBJECTIVES_PER_MODULE`, `GENERATION_MAX_TASKS_PER_MODULE`, `GENERATION_MAX_CHECKLIST_PER_MODULE`, `GENERATION_MAX_QUIZ_PER_MODULE` (each at least 1) and `GENERATION_MAX_TEXT_LENGTH` (20–4000) add `maxItems` / `maxLength` to the JSON Schema sent to the provider, which shrinks the model output on slow free models. They are not in the prompt text, so there is no template-hash change and no migration. Blank means uncapped. Source locators are never length-capped, and traceability and mandatory-coverage validation are unchanged.
+
 4. Create `apps/web/.env.local` containing `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `API_BASE_URL=http://127.0.0.1:8000`, and the same `MAX_UPLOAD_BYTES`.
 
 Never put a provider key, `SUPABASE_SERVICE_ROLE_KEY`, or `DATABASE_URL` in a `NEXT_PUBLIC_*` variable, and never commit `.env`.

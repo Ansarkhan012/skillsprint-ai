@@ -4,7 +4,8 @@ from hashlib import sha256
 import json
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .generation_context import input_hash
 from .generation_models import GenerationInputSnapshot
@@ -138,6 +139,70 @@ def provider_output_schema() -> dict:
 
 
 PROVIDER_OUTPUT_SCHEMA = provider_output_schema()
+
+# Free-text fields the model writes. `locator` is excluded: it must be copied exactly
+# for source traceability, so it is never length-capped.
+_UNCAPPED_TEXT = frozenset({"locator"})
+_COMPACT_ARRAYS = {"learning_objectives": "generation_max_objectives_per_module",
+                   "tasks": "generation_max_tasks_per_module",
+                   "checklist_items": "generation_max_checklist_per_module",
+                   "quizzes": "generation_max_quiz_per_module"}
+
+
+class GenerationLimits(BaseSettings):
+    """Optional compact-generation caps sent only in the provider JSON Schema.
+
+    Blank/unset keeps today's behaviour. Pydantic output validation is unchanged: it
+    already accepts these tighter bounds, and "at least one item per module" still holds.
+    Not part of the prompt text or template hash, so no migration is needed.
+    """
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    generation_max_objectives_per_module: int | None = Field(default=None, ge=1, le=100)
+    generation_max_tasks_per_module: int | None = Field(default=None, ge=1, le=100)
+    generation_max_checklist_per_module: int | None = Field(default=None, ge=1, le=100)
+    generation_max_quiz_per_module: int | None = Field(default=None, ge=1, le=100)
+    generation_max_text_length: int | None = Field(default=None, ge=20, le=4000)
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def blank_is_unset(cls, value):
+        return None if isinstance(value, str) and not value.strip() else value
+
+
+def capped_provider_schema(limits: GenerationLimits) -> dict:
+    """Default provider schema plus maxItems/maxLength for the configured caps only."""
+    schema = provider_output_schema()
+    module = schema["$defs"]["Module"]["properties"]
+    for field, setting in _COMPACT_ARRAYS.items():
+        if getattr(limits, setting) is not None:
+            module[field]["maxItems"] = getattr(limits, setting)
+    if limits.generation_max_text_length is not None:
+        original = _compact_schema(OnboardingPlan.model_json_schema())
+
+        def cap(node: dict, source: dict) -> None:
+            # Text/ShortText carry pattern "\S" in the Pydantic schema; IDs/enums/dates do not.
+            if source.get("pattern") == r"\S":
+                node["maxLength"] = min(source.get("maxLength", 4000), limits.generation_max_text_length)
+            elif source.get("type") == "array" and isinstance(source.get("items"), dict) \
+                    and source["items"].get("pattern") == r"\S":
+                node["items"]["maxLength"] = min(source["items"].get("maxLength", 4000),
+                                                 limits.generation_max_text_length)
+
+        for name, definition in original["$defs"].items():
+            for prop, source in definition.get("properties", {}).items():
+                if prop not in _UNCAPPED_TEXT:
+                    cap(schema["$defs"][name]["properties"][prop], source)
+        for prop, source in original.get("properties", {}).items():
+            cap(schema["properties"][prop], source)
+    return schema
+
+
+def current_provider_schema() -> dict:
+    """Schema for the next provider request; re-reads .env like the provider settings."""
+    limits = GenerationLimits()
+    if all(getattr(limits, name) is None for name in GenerationLimits.model_fields):
+        return PROVIDER_OUTPUT_SCHEMA
+    return capped_provider_schema(limits)
 OUTPUT_SPEC = canonical_json(compact_output_contract())
 OUTPUT_MAPPING = (
     "Copy projection.employee employee_id,role_id,department_id,location_code,joining_date to employee_context; "

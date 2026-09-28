@@ -544,3 +544,43 @@ def test_gemini_thinking_level_is_optional_and_sent_only_when_configured(monkeyp
     asyncio.run(scenario(None)); asyncio.run(scenario("low"))
     assert "thinkingConfig" not in bodies[0]["generationConfig"]
     assert bodies[1]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "low"}
+
+
+def test_compact_limits_cap_provider_schema_only_and_never_the_locator(monkeypatch):
+    from app.generation_prompt import GenerationLimits, current_provider_schema
+    from app.generation_provider import json_schema_response_format
+    assert current_provider_schema() is PROVIDER_OUTPUT_SCHEMA  # blank limits: unchanged
+    for name in ("OBJECTIVES", "TASKS", "CHECKLIST", "QUIZ"):
+        monkeypatch.setenv(f"GENERATION_MAX_{name}_PER_MODULE", "1")
+    monkeypatch.setenv("GENERATION_MAX_TEXT_LENGTH", "200")
+    schema = current_provider_schema()
+    module = schema["$defs"]["Module"]["properties"]
+    for field in ("learning_objectives", "tasks", "checklist_items", "quizzes"):
+        assert (module[field]["minItems"], module[field]["maxItems"]) == (1, 1)
+    assert module["title"]["maxLength"] == 200 and module["purpose"]["maxLength"] == 200
+    assert schema["$defs"]["Task"]["properties"]["completion_criteria"]["items"]["maxLength"] == 200
+    assert "maxLength" not in schema["$defs"]["SourceRef"]["properties"]["locator"]  # traceability
+    assert "maxLength" not in module["module_id"] and "maxItems" not in module["source_refs"]
+    assert "maxItems" not in PROVIDER_OUTPUT_SCHEMA["$defs"]["Module"]["properties"]["tasks"]
+    assert json_schema_response_format(schema)["json_schema"]["schema"] is schema
+    # Pydantic already accepts compact output: one item each is valid, as is 200-char text.
+    OnboardingPlan.model_validate_json(json.dumps(complete_output()))
+    monkeypatch.setenv("GENERATION_MAX_TEXT_LENGTH", "10")
+    with pytest.raises(ValueError):
+        GenerationLimits()
+
+
+def test_adapters_send_the_capped_schema_when_configured(monkeypatch):
+    monkeypatch.setenv("GENERATION_MAX_TASKS_PER_MODULE", "1")
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"candidates": [{"finishReason": "STOP", "content": {
+            "parts": [{"text": json.dumps(complete_output())}]}}]})
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await GeminiProvider(client, ProviderConfig(model="mock-model", api_key="k")).generate(build_prompt(ready().snapshot))
+    asyncio.run(scenario())
+    assert bodies[0]["generationConfig"]["responseJsonSchema"]["$defs"]["Module"]["properties"]["tasks"]["maxItems"] == 1

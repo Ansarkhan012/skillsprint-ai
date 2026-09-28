@@ -7,13 +7,17 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .generation_prompt import (FORMAT_RETRY_RULE, MAX_PROVIDER_REQUEST_BYTES, PROVIDER_OUTPUT_SCHEMA,
+from .generation_prompt import (FORMAT_RETRY_RULE, MAX_PROVIDER_REQUEST_BYTES, PROVIDER_OUTPUT_SCHEMA, current_provider_schema,
                                 PromptPack)
 
 # OpenAI-compatible constrained decoding; strict=False because strict mode rejects
 # the optional/nullable shapes the Pydantic contract allows. Parsing stays authoritative.
-JSON_SCHEMA_RESPONSE_FORMAT = {"type": "json_schema", "json_schema": {
-    "name": "onboarding_plan", "strict": False, "schema": PROVIDER_OUTPUT_SCHEMA}}
+def json_schema_response_format(schema: dict) -> dict:
+    return {"type": "json_schema", "json_schema": {"name": "onboarding_plan", "strict": False, "schema": schema}}
+
+
+# Default (uncapped) format; requests use the per-request schema from current_provider_schema().
+JSON_SCHEMA_RESPONSE_FORMAT = json_schema_response_format(PROVIDER_OUTPUT_SCHEMA)
 
 
 class ProviderConfig(BaseModel):
@@ -156,7 +160,7 @@ class GeminiProvider:
         encoded = httpx.Request("POST", "https://invalid.local", json=payload).content
         if not prompt.within_budget or len(encoded) > MAX_PROVIDER_REQUEST_BYTES:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
-        payload["generationConfig"]["responseJsonSchema"] = PROVIDER_OUTPUT_SCHEMA
+        payload["generationConfig"]["responseJsonSchema"] = current_provider_schema()
         encoded = httpx.Request("POST", "https://invalid.local", json=payload).content
         response = await post_with_deadline(
             self.client, f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.model}:generateContent",
@@ -232,7 +236,7 @@ class GroqProvider:
         if not prompt.within_budget or len(encoded) > MAX_PROVIDER_REQUEST_BYTES:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
         encoded = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions",
-                                json={**payload, "response_format": JSON_SCHEMA_RESPONSE_FORMAT}).content
+                                json={**payload, "response_format": json_schema_response_format(current_provider_schema())}).content
         response = await post_with_deadline(
             self.client, "https://api.groq.com/openai/v1/chat/completions",
             deadline_seconds=self.config.timeout_seconds,
