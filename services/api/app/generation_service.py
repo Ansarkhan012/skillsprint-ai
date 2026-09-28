@@ -78,9 +78,17 @@ class AttemptTelemetry(BaseModel):
 
 
 class StructuralFailure(Exception):
-    def __init__(self, code: str):
+    def __init__(self, code: str, diagnostics: tuple[dict[str, object], ...] = ()):
         super().__init__(code)
         self.code = code
+        self.diagnostics = diagnostics
+
+
+def retry_feedback(failure: StructuralFailure) -> str:
+    """Retry hint built only from our own error code and allowlisted schema path/type."""
+    problems = "; ".join(".".join(str(part) for part in item["loc"]) + " " + str(item["type"])
+                         for item in failure.diagnostics)
+    return "Previous failure: " + failure.code + (". Fix: " + problems if problems else "") + "."
 
 
 def _unique_pairs(pairs: list[tuple[str, object]]) -> dict:
@@ -113,9 +121,10 @@ def parse_plan(text: str, request_id: UUID, snapshot: GenerationInputSnapshot) -
         if isinstance(exc, StructuralFailure):
             raise
         if isinstance(exc, ValidationError):
-            _LOG.warning("generation_schema_invalid request_id=%s diagnostics=%s",
-                         request_id, safe_validation_diagnostics(exc))
-        raise StructuralFailure("SCHEMA_INVALID" if isinstance(exc, ValidationError) else "MALFORMED_JSON") from None
+            diagnostics = safe_validation_diagnostics(exc)
+            _LOG.warning("generation_schema_invalid request_id=%s diagnostics=%s", request_id, diagnostics)
+            raise StructuralFailure("SCHEMA_INVALID", diagnostics) from None
+        raise StructuralFailure("MALFORMED_JSON") from None
     if plan.generation_request_id != request_id:
         raise StructuralFailure("REQUEST_ID_MISMATCH")
     context = plan.employee_context
@@ -186,6 +195,7 @@ async def generate_unverified(
     calls = 0
     transport_retries = 0
     rate_limit_retries = 0
+    attempt_prompt = prompt
     for format_attempt in range(2):
         first_in_format = True
         while True:
@@ -194,7 +204,7 @@ async def generate_unverified(
             first_in_format = False
             started = perf_counter()
             try:
-                response = await provider.generate(prompt, format_retry=bool(format_attempt))
+                response = await provider.generate(attempt_prompt, format_retry=bool(format_attempt))
                 if response.finish_reason != "STOP":
                     raise StructuralFailure("TRUNCATED_RESPONSE" if response.finish_reason == "MAX_TOKENS"
                                             else "PROVIDER_RESPONSE_REJECTED")
@@ -239,6 +249,7 @@ async def generate_unverified(
                         error_code=exc.code))
                 if format_attempt == 0 and exc.code in {"EMPTY_RESPONSE", "MALFORMED_JSON", "SCHEMA_INVALID",
                                                        "TRUNCATED_RESPONSE", "RESPONSE_TOO_LARGE"}:
+                    attempt_prompt = prompt.model_copy(update={"rules": prompt.rules + "\n" + retry_feedback(exc)})
                     break
                 return GenerationResult(status="FAILED", error_code=exc.code, provider_calls=calls)
             except Exception:
