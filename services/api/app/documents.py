@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, ValidationError
 
+from .adversarial import flag_chunks, scan_text
 from .config import Settings, get_settings
 from .document_processing import (
     DOCX_MIME, PARSER_VERSION, DocumentInput, DocumentProblem,
@@ -53,7 +54,7 @@ async def process_reserved_version(version_id: UUID, data: bytes,
     })
     return {"document_id": document_id, "version_id": str(version_id),
             "parse_status": parse_status, "review_status": "DRAFT", "chunk_count": len(chunks),
-            "reason_code": reason}
+            "reason_code": reason, "security_flags": flag_chunks(chunks)}
 
 
 @router.post("/documents/uploads", status_code=202)
@@ -221,7 +222,8 @@ async def get_document_chunks(version_id: UUID, offset: int = 0, limit: int = 10
         "document_version_id": f"eq.{version_id}", "order": "sequence.asc",
         "limit": str(limit + 1), "offset": str(offset),
     })
-    return {"items": rows[:limit], "offset": offset, "limit": limit, "has_more": len(rows) > limit}
+    items = [{**row, "security_flags": list(scan_text(row.get("content") or ""))} for row in rows[:limit]]
+    return {"items": items, "offset": offset, "limit": limit, "has_more": len(rows) > limit}
 
 
 @router.get("/document-versions/{version_id}/original")

@@ -43,6 +43,7 @@ export type DocumentChunk = {
   page_number: number | null;
   paragraph_start: number | null;
   paragraph_end: number | null;
+  security_flags?: string[];
 };
 
 export type UploadResult = {
@@ -52,6 +53,7 @@ export type UploadResult = {
   review_status: ReviewStatus;
   chunk_count: number;
   reason_code: string | null;
+  security_flags?: Array<{ sequence: number; codes: string[] }>;
 };
 
 export type DocumentPage<T> = { items: T[]; offset: number; limit: number; has_more: boolean };
