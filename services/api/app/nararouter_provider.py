@@ -2,6 +2,7 @@
 
 import logging
 import re
+from typing import Literal
 from time import perf_counter
 
 import httpx
@@ -10,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .generation_prompt import FORMAT_RETRY_RULE, MAX_PROVIDER_REQUEST_BYTES, PromptPack
 from .generation_provider import (JSON_SCHEMA_RESPONSE_FORMAT, ProviderConfig, ProviderFailure,
-                                  ProviderResult, ProviderUsage, _bounded_retry_after)
+                                  ProviderResult, ProviderUsage, _bounded_retry_after, post_with_deadline)
 
 
 MODEL_IDENTIFIER = re.compile(r"[A-Za-z0-9_./-]{1,100}", re.ASCII)
@@ -37,6 +38,8 @@ OUTPUT_INSTRUCTIONS = (
 class NaraRouterConfig(ProviderConfig):
     model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
     base_url: str = Field(repr=False)
+    # OpenAI-compatible reasoning control; None omits the parameter entirely.
+    reasoning_effort: Literal["none", "low", "medium", "high"] | None = None
 
     @field_validator("base_url")
     @classmethod
@@ -75,6 +78,8 @@ class NaraRouterEnvironment(BaseSettings):
     nararouter_timeout_seconds: float = 30
     nararouter_max_output_tokens: int = 8192
     nararouter_temperature: float = 0.1
+    # Opt-in. Live tests: "none" made free models fast but return plans with no modules.
+    nararouter_reasoning_effort: str | None = None
 
     def adapter_config(self) -> NaraRouterConfig:
         if not self.nararouter_api_key or not self.nararouter_base_url or not self.nararouter_model:
@@ -84,7 +89,8 @@ class NaraRouterEnvironment(BaseSettings):
                 api_key=self.nararouter_api_key, base_url=self.nararouter_base_url,
                 timeout_seconds=self.nararouter_timeout_seconds,
                 max_output_tokens=self.nararouter_max_output_tokens,
-                temperature=self.nararouter_temperature)
+                temperature=self.nararouter_temperature,
+                reasoning_effort=self.nararouter_reasoning_effort or None)
         except ValueError:
             raise ProviderFailure("PROVIDER_CONFIGURATION_FAILED") from None
 
@@ -99,7 +105,8 @@ def nararouter_request_payload(prompt: PromptPack, config: NaraRouterConfig,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": prompt.untrusted_data}],
             "response_format": {"type": "json_object"}, "stream": False,
-            "temperature": config.temperature, "max_tokens": config.max_output_tokens}
+            "temperature": config.temperature, "max_tokens": config.max_output_tokens,
+            **({"reasoning_effort": config.reasoning_effort} if config.reasoning_effort else {})}
 
 
 def _usage(value: object) -> ProviderUsage | None:
@@ -145,15 +152,10 @@ class NaraRouterProvider:
         encoded = httpx.Request("POST", url, json={
             **payload, "response_format": JSON_SCHEMA_RESPONSE_FORMAT}).content
         started = perf_counter()
-        try:
-            response = await self.client.post(url, content=encoded,
-                headers={"Authorization": "Bearer " + self.config.api_key.get_secret_value(),
-                         "Content-Type": "application/json"},
-                timeout=self.config.timeout_seconds, follow_redirects=False)
-        except httpx.TimeoutException:
-            raise ProviderFailure("PROVIDER_TIMEOUT", retryable=True) from None
-        except httpx.TransportError:
-            raise ProviderFailure("PROVIDER_UNAVAILABLE", retryable=True) from None
+        response = await post_with_deadline(self.client, url, deadline_seconds=self.config.timeout_seconds,
+            content=encoded, follow_redirects=False,
+            headers={"Authorization": "Bearer " + self.config.api_key.get_secret_value(),
+                     "Content-Type": "application/json"})
         latency = max(0, int((perf_counter() - started) * 1000))
         if not response.is_success:
             safe_code, safe_hint = _safe_error_metadata(response)

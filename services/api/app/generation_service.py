@@ -173,7 +173,7 @@ SAFE_PROVIDER_ERRORS = frozenset({
     "GENERATION_PROJECTION_TOO_LARGE",
     "PROVIDER_TIMEOUT", "PROVIDER_RATE_LIMIT", "PROVIDER_UNAVAILABLE", "PROVIDER_AUTH_FAILED",
     "PROVIDER_CONFIGURATION_FAILED", "PROVIDER_REQUEST_FAILED", "PROVIDER_RESPONSE_TOO_LARGE",
-    "PROVIDER_ACCESS_DENIED", "PROVIDER_PAYMENT_REQUIRED",
+    "PROVIDER_ACCESS_DENIED", "PROVIDER_PAYMENT_REQUIRED", "PROVIDER_DEADLINE_EXCEEDED",
     "PROVIDER_RESPONSE_REJECTED", "PROVIDER_INVALID_RESPONSE", "PROVIDER_TRUNCATED",
 })
 STRUCTURAL_PROVIDER_ERRORS = {"PROVIDER_TRUNCATED", "PROVIDER_INVALID_RESPONSE"}
@@ -221,7 +221,7 @@ async def generate_unverified(
                 if on_attempt:
                     await on_attempt(AttemptTelemetry(
                         attempt_type=attempt_type,
-                        provider_outcome={"PROVIDER_TIMEOUT": "TIMEOUT", "PROVIDER_RATE_LIMIT": "RATE_LIMIT",
+                        provider_outcome={"PROVIDER_TIMEOUT": "TIMEOUT", "PROVIDER_DEADLINE_EXCEEDED": "TIMEOUT", "PROVIDER_RATE_LIMIT": "RATE_LIMIT",
                                           "PROVIDER_UNAVAILABLE": "UNAVAILABLE"}.get(code, "REJECTED"),
                         latency_ms=min(int((perf_counter() - started) * 1000), 600000),
                         parse_outcome="NOT_PARSED", error_code=code))

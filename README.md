@@ -48,16 +48,18 @@ npm install
    | `gemini` | `GEMINI_API_KEY`, `GEMINI_MODEL` | The Gemini free tier allows only about 20 requests/day per model |
    | `groq` | `GROQ_API_KEY` (`GROQ_MODEL=openai/gpt-oss-20b`) | Free-tier tokens-per-minute limits can reject full plans (HTTP 413) |
 
-   **NaraRouter model notes** (measured 2026-09-28 with the repository's 6-requirement fixture; one full generation each):
+   **NaraRouter model notes** (measured 2026-09-28 with the repository's 6-requirement fixture; one full generation per row):
 
-   | Model | Result |
-   |---|---|
-   | `agnes-2.5-flash` (**default**) | Schema-valid on the first call in about 136 s: 5 modules, each with objectives, a checklist item, a task and a quiz; traceability 25/25 |
-   | `nemotron-3-ultra-free` (**fallback**) | Free plan, 1M context. Allowed by `202609280003` but not yet tested live |
-   | `agnes-3-flash` | Accepted the request, but both attempts were truncated at 16,384 output tokens after 3–5 minutes. Not recommended |
-   | `gemini-3.8-flash-high` | Pay-as-you-go: HTTP 402 (`PROVIDER_PAYMENT_REQUIRED`) without credits |
+   | Model | Reasoning | Result |
+   |---|---|---|
+   | `agnes-2.5-flash` (**default**) | model default | Schema-valid in about 136 s: 5 modules, each with objectives, checklist, task and quiz; traceability 25/25 |
+   | `agnes-2.5-flash` | `none` | Schema-valid in 17 s but **0 modules** (validator: Manual Review) |
+   | `nemotron-3.5-lightning-free` | `none` | Schema-valid in 26 s but **0 modules** (validator: Incomplete) |
+   | `nemotron-3.5-lightning-free` | model default | Two unusable responses, 136 s each |
+   | `agnes-3-flash` | model default | Truncated at 16,384 output tokens after 3–5 minutes |
+   | `gemini-3.8-flash-high` | — | Pay-as-you-go: HTTP 402 (`PROVIDER_PAYMENT_REQUIRED`) without credits |
 
-   A generation takes about 2 minutes on the free models, which is above the SRS 30-second target. The reasoning models spend much of their time before emitting the plan.
+   `NARAROUTER_TIMEOUT_SECONDS` (max 60) is a **total** deadline per provider call. Overruns fail with `PROVIDER_DEADLINE_EXCEEDED` and are not retried. No free model currently produces a complete single-call plan within 60 s, so full-plan generation with the free models exceeds the deadline and the SRS 30-second target. See Limitations.
 
 4. Create `apps/web/.env.local` containing `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `API_BASE_URL=http://127.0.0.1:8000`, and the same `MAX_UPLOAD_BYTES`.
 
@@ -187,6 +189,7 @@ The API enforces RBAC on the server before each operation, and Supabase RLS prot
 - Requirements are authored by people in the RRM (with evidence links). They are not extracted automatically, because the matrix is the approved ground truth.
 - Factual entailment of generated prose is not machine-checked. Grounding is enforced through requirement IDs and approved source references.
 - Employee progress tracking, weak-area detection, adaptive recommendations, impact analysis, selective regeneration, and the consistency score (SRS Steps 44–45, 50–59) are not implemented.
+- Full-plan generation on the free NaraRouter models takes about 2 minutes; the configured 60 s total deadline stops it. Generating per stage (smaller outputs, run in parallel) is the planned fix.
 - OCR is not used. Scanned PDFs without text are marked *Needs review*.
 
 ## 12. Links

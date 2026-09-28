@@ -387,3 +387,33 @@ def test_free_model_migration_changes_only_the_nararouter_model_allowlist():
     top_level = new[:new.index(marker)] + new[new.index('end $$;', new.index(marker)):]
     assert not any(line.lstrip().lower().startswith(('update ', 'delete ', 'insert ', 'truncate '))
                    for line in top_level.splitlines())  # the function body itself inserts runs
+
+
+def test_reasoning_effort_is_sent_only_when_configured(monkeypatch):
+    prompt = build_prompt(ready().snapshot, REQUEST)
+    assert 'reasoning_effort' not in nararouter_request_payload(prompt, config())
+    assert nararouter_request_payload(prompt, config(reasoning_effort='none'))['reasoning_effort'] == 'none'
+    monkeypatch.delenv('NARAROUTER_REASONING_EFFORT', raising=False)
+    assert NaraRouterEnvironment(_env_file=None).adapter_config().reasoning_effort is None  # opt-in only
+    monkeypatch.setenv('NARAROUTER_REASONING_EFFORT', '')
+    assert NaraRouterEnvironment().adapter_config().reasoning_effort is None
+    monkeypatch.setenv('NARAROUTER_REASONING_EFFORT', 'none')
+    assert NaraRouterEnvironment().adapter_config().reasoning_effort == 'none'
+    monkeypatch.setenv('NARAROUTER_REASONING_EFFORT', 'maximum')
+    with pytest.raises(ProviderFailure, match='PROVIDER_CONFIGURATION_FAILED'):
+        NaraRouterEnvironment().adapter_config()
+
+
+def test_total_deadline_fails_cleanly_once_without_retry():
+    calls = []
+    async def slow(request):
+        calls.append(request)
+        await asyncio.sleep(5)  # e.g. a slowly streamed body that never trips per-read timeouts
+        return httpx.Response(200, json=response_body())
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(slow)) as client:
+            provider = NaraRouterProvider(client, config(timeout_seconds=1))
+            return await generate_unverified(ready(), REQUEST, provider, sleep=lambda _: asyncio.sleep(0))
+    result = asyncio.run(run())
+    assert result.status == 'FAILED' and result.error_code == 'PROVIDER_DEADLINE_EXCEEDED'
+    assert result.provider_calls == len(calls) == 1

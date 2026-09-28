@@ -1,5 +1,6 @@
 """Provider-neutral result/error types and backend-only generation adapters."""
 
+import asyncio
 from typing import Protocol
 
 import httpx
@@ -103,6 +104,21 @@ def _bounded_retry_after(value: str | None) -> float | None:
     return seconds if 0 <= seconds <= 60 else None
 
 
+async def post_with_deadline(client: httpx.AsyncClient, url: str, *, deadline_seconds: float, **kwargs) -> httpx.Response:
+    """Bound the whole request. httpx timeouts apply per network read, so a slowly
+    streamed body can otherwise run for minutes. A deadline overrun is not retried:
+    a model that is too slow for this prompt stays too slow on an identical retry."""
+    try:
+        async with asyncio.timeout(deadline_seconds):
+            return await client.post(url, timeout=deadline_seconds, **kwargs)
+    except httpx.TimeoutException:
+        raise ProviderFailure("PROVIDER_TIMEOUT", retryable=True) from None
+    except httpx.TransportError:
+        raise ProviderFailure("PROVIDER_UNAVAILABLE", retryable=True) from None
+    except TimeoutError:
+        raise ProviderFailure("PROVIDER_DEADLINE_EXCEEDED") from None
+
+
 class GenerationProvider(Protocol):
     async def generate(self, prompt: PromptPack, *, format_retry: bool = False) -> ProviderResult: ...
 
@@ -134,15 +150,10 @@ class GeminiProvider:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
         payload["generationConfig"]["responseJsonSchema"] = PROVIDER_OUTPUT_SCHEMA
         encoded = httpx.Request("POST", "https://invalid.local", json=payload).content
-        try:
-            response = await self.client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.model}:generateContent",
-                headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-                content=encoded, timeout=self.config.timeout_seconds)
-        except httpx.TimeoutException:
-            raise ProviderFailure("PROVIDER_TIMEOUT", retryable=True) from None
-        except httpx.TransportError:
-            raise ProviderFailure("PROVIDER_UNAVAILABLE", retryable=True) from None
+        response = await post_with_deadline(
+            self.client, f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.model}:generateContent",
+            deadline_seconds=self.config.timeout_seconds,
+            headers={"x-goog-api-key": key, "Content-Type": "application/json"}, content=encoded)
         if response.status_code == 429:
             delay = _bounded_retry_after(response.headers.get("Retry-After"))
             raise ProviderFailure("PROVIDER_RATE_LIMIT", retryable=True, retry_after_seconds=delay)
@@ -214,15 +225,10 @@ class GroqProvider:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
         encoded = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions",
                                 json={**payload, "response_format": JSON_SCHEMA_RESPONSE_FORMAT}).content
-        try:
-            response = await self.client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, content=encoded,
-                timeout=self.config.timeout_seconds)
-        except httpx.TimeoutException:
-            raise ProviderFailure("PROVIDER_TIMEOUT", retryable=True) from None
-        except httpx.TransportError:
-            raise ProviderFailure("PROVIDER_UNAVAILABLE", retryable=True) from None
+        response = await post_with_deadline(
+            self.client, "https://api.groq.com/openai/v1/chat/completions",
+            deadline_seconds=self.config.timeout_seconds,
+            headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, content=encoded)
         if response.status_code == 408:
             raise ProviderFailure("PROVIDER_TIMEOUT", retryable=True)
         if response.status_code == 413:
