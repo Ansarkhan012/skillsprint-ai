@@ -9,7 +9,8 @@ from pydantic import ConfigDict, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .generation_prompt import FORMAT_RETRY_RULE, MAX_PROVIDER_REQUEST_BYTES, PromptPack
-from .generation_provider import ProviderConfig, ProviderFailure, ProviderResult, ProviderUsage, _bounded_retry_after
+from .generation_provider import (JSON_SCHEMA_RESPONSE_FORMAT, ProviderConfig, ProviderFailure,
+                                  ProviderResult, ProviderUsage, _bounded_retry_after)
 
 
 MODEL_IDENTIFIER = re.compile(r"[A-Za-z0-9_./-]{1,100}", re.ASCII)
@@ -141,6 +142,8 @@ class NaraRouterProvider:
         encoded = httpx.Request("POST", url, json=payload).content
         if not prompt.within_budget or len(encoded) > MAX_PROVIDER_REQUEST_BYTES:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
+        encoded = httpx.Request("POST", url, json={
+            **payload, "response_format": JSON_SCHEMA_RESPONSE_FORMAT}).content
         started = perf_counter()
         try:
             response = await self.client.post(url, content=encoded,

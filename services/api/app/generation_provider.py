@@ -6,7 +6,13 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .generation_prompt import FORMAT_RETRY_RULE, MAX_PROVIDER_REQUEST_BYTES, PromptPack
+from .generation_prompt import (FORMAT_RETRY_RULE, MAX_PROVIDER_REQUEST_BYTES, PROVIDER_OUTPUT_SCHEMA,
+                                PromptPack)
+
+# OpenAI-compatible constrained decoding; strict=False because strict mode rejects
+# the optional/nullable shapes the Pydantic contract allows. Parsing stays authoritative.
+JSON_SCHEMA_RESPONSE_FORMAT = {"type": "json_schema", "json_schema": {
+    "name": "onboarding_plan", "strict": False, "schema": PROVIDER_OUTPUT_SCHEMA}}
 
 
 class ProviderConfig(BaseModel):
@@ -126,6 +132,8 @@ class GeminiProvider:
         encoded = httpx.Request("POST", "https://invalid.local", json=payload).content
         if not prompt.within_budget or len(encoded) > MAX_PROVIDER_REQUEST_BYTES:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
+        payload["generationConfig"]["responseJsonSchema"] = PROVIDER_OUTPUT_SCHEMA
+        encoded = httpx.Request("POST", "https://invalid.local", json=payload).content
         try:
             response = await self.client.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.model}:generateContent",
@@ -205,6 +213,8 @@ class GroqProvider:
                                 json=payload).content
         if not prompt.within_budget or len(encoded) > MAX_PROVIDER_REQUEST_BYTES:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
+        encoded = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions",
+                                json={**payload, "response_format": JSON_SCHEMA_RESPONSE_FORMAT}).content
         try:
             response = await self.client.post(
                 "https://api.groq.com/openai/v1/chat/completions",

@@ -94,6 +94,42 @@ def compact_output_contract() -> dict:
     }
 
 
+_PROVIDER_DROPPED_KEYS = frozenset({"minItems", "maxItems", "minLength", "maxLength",
+                                    "minimum", "maximum", "pattern"})
+
+
+def _provider_schema(value: object) -> object:
+    if isinstance(value, dict):
+        node = {}
+        for key, item in value.items():
+            if key in _PROVIDER_DROPPED_KEYS:
+                continue
+            if key == "const":
+                node["enum"] = [item]
+            elif key in ("$defs", "properties"):
+                node[key] = {name: _provider_schema(schema) for name, schema in item.items()}
+            else:
+                node[key] = _provider_schema(item)
+        if node.get("type") == "object" and "properties" in node:
+            node["required"] = sorted(node["properties"])
+        return node
+    if isinstance(value, list):
+        return [_provider_schema(item) for item in value]
+    return value
+
+
+def provider_output_schema() -> dict:
+    """Structure hint for provider-side constrained decoding, derived from OnboardingPlan.
+
+    Every key is required so a model cannot silently omit fields. Value bounds and
+    patterns are dropped because Gemini rejects them; strict Pydantic parsing and the
+    Python validator still enforce every constraint. Sent outside the template hash
+    and the request-size guard, which bound only prompt text and untrusted context.
+    """
+    return _provider_schema(_compact_schema(OnboardingPlan.model_json_schema()))
+
+
+PROVIDER_OUTPUT_SCHEMA = provider_output_schema()
 OUTPUT_SPEC = canonical_json(compact_output_contract())
 OUTPUT_MAPPING = (
     "Copy projection.employee employee_id,role_id,department_id,location_code,joining_date to employee_context; "

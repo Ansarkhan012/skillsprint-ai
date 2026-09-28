@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from app import generation_api
 from app.generation_prompt import build_prompt, FORMAT_RETRY_RULE, PROMPT_VERSION, template_hash
-from app.generation_provider import GeminiProvider, GroqProvider, ProviderFailure
+from app.generation_provider import GeminiProvider, GroqProvider, JSON_SCHEMA_RESPONSE_FORMAT, ProviderFailure
 from app.generation_service import generate_unverified
 from app.nararouter_provider import (NaraRouterConfig, NaraRouterEnvironment, NaraRouterProvider,
                                     nararouter_request_payload, OUTPUT_INSTRUCTIONS)
@@ -95,12 +95,13 @@ def test_request_preserves_v2_and_response_metadata(caplog, retry):
         assert str(request.url) == BASE + '/chat/completions'
         assert request.headers['Authorization'] == 'Bearer ' + SECRET
         body = json.loads(request.content)
-        assert body == nararouter_request_payload(prompt, config(), format_retry=retry)
+        assert body == {**nararouter_request_payload(prompt, config(), format_retry=retry),
+                        'response_format': JSON_SCHEMA_RESPONSE_FORMAT}
         assert body['messages'] == [
             {'role': 'system', 'content': prompt.system + '\n' + prompt.rules + '\n' + OUTPUT_INSTRUCTIONS + ('\n'+FORMAT_RETRY_RULE if retry else '')},
             {'role': 'user', 'content': prompt.untrusted_data}]
         assert body['model'] == MODEL and body['max_tokens'] == 8192
-        assert body['response_format'] == {'type': 'json_object'} and body['stream'] is False
+        assert body['stream'] is False
         assert SECRET.encode() not in request.content
         assert prompt.prompt_version == 'phase4d-compact-context/2.0.0'
         return httpx.Response(200, json=response_body(usage={
