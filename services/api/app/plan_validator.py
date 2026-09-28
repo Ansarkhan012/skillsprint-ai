@@ -104,7 +104,11 @@ def validate_plan(content: dict, snapshot: GenerationInputSnapshot, run_id,
         if applicability(req.applicability, context) != "APPLICABLE":
             add("ROLE_APPLICABILITY_MISMATCH", "input.applicability", req.revision_id)
         if req.timing.state != "NOT_SPECIFIED":
-            add("TIMING_UNRESOLVED", "input.timing", req.revision_id, "REVIEW")
+            # Structured timing on a staged requirement is still checked at stage level
+            # (stage placement/due stages are errors below); only the finer deadline is
+            # not machine-comparable, so it warns. Ambiguous or unstaged timing needs review.
+            staged = req.timing.state == "STRUCTURED" and req.stage_definition_id is not None
+            add("TIMING_UNRESOLVED", "input.timing", req.revision_id, "WARNING" if staged else "REVIEW")
     if not requirements or len(requirements) != len(snapshot.requirements):
         add("STRUCTURAL_REFERENCE_INVALID", "input.requirements")
     expected_stages = snapshot.stage_set.items

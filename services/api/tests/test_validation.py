@@ -109,8 +109,9 @@ def test_wrong_requirement_source_pair_is_not_accepted_even_if_source_exists_els
     assert check(plan,frozen)[1].status=="UNSUPPORTED"
 
 
-@pytest.mark.parametrize("state",["AMBIGUOUS","STRUCTURED"])
-def test_timing_without_output_timing_tuple_requires_review(state):
+@pytest.mark.parametrize("state,staged,status",[("AMBIGUOUS",True,"MANUAL_REVIEW"),
+    ("STRUCTURED",True,"VERIFIED_WITH_WARNING"),("STRUCTURED",False,"MANUAL_REVIEW")])
+def test_timing_without_output_timing_tuple_warns_only_when_staged(state,staged,status):
     frozen,plan=fixture()
     timing=Timing(state="AMBIGUOUS",original_text="Within 2 days")
     if state=="STRUCTURED":
@@ -118,8 +119,11 @@ def test_timing_without_output_timing_tuple_requires_review(state):
         timing=Timing(state="STRUCTURED",original_text="Within 2 calendar days after joining date",
             trigger="joining date",relation="WITHIN",value=2,unit="DAY",calendar_basis="CALENDAR",
             evidence={key:span for key in ("original_text","trigger","relation","value","unit","calendar_basis")})
-    frozen=frozen.model_copy(update={"requirements":(frozen.requirements[0].model_copy(update={"timing":timing}),*frozen.requirements[1:])})
-    assert check(plan,frozen)[1].status=="MANUAL_REVIEW"
+    update={"timing":timing} if staged else {"timing":timing,"stage_definition_id":None}
+    frozen=frozen.model_copy(update={"requirements":(frozen.requirements[0].model_copy(update=update),*frozen.requirements[1:])})
+    evidence,decision=check(plan,frozen)
+    assert decision.status==status and "TIMING_UNRESOLVED" in decision.reason_codes
+    assert evidence.mandatory_covered==evidence.mandatory_total==6
 
 
 @pytest.mark.parametrize("stale_source",[False,True])

@@ -13,8 +13,7 @@ PRECEDENCE = (
 
 
 def decide(evidence: ValidationEvidence) -> JEVDecision:
-    blockers = {item.code for item in evidence.findings
-                if item.severity != "WARNING" or item.code != "DUPLICATE_REQUIREMENT"}
+    blockers = {item.code for item in evidence.findings if item.severity != "WARNING"}
     reasons = tuple(sorted({item.code for item in evidence.findings}))
     for index, (status, codes) in enumerate(PRECEDENCE, 1):
         if blockers & codes:
