@@ -454,8 +454,14 @@ def test_gemini_transport_and_response_shape_errors(kind, code):
 
 
 def test_provider_schema_requires_every_key_and_drops_gemini_unsupported_bounds():
+    module_props = PROVIDER_OUTPUT_SCHEMA["$defs"]["Module"]["properties"]
+    assert {name for name, prop in module_props.items() if "minItems" in prop} == {
+        "learning_objectives", "checklist_items", "tasks", "quizzes"}
+
     def walk(node):
         if isinstance(node, dict):
+            if node.get("minItems") == 1 and node.get("type") == "array":
+                node = {key: value for key, value in node.items() if key != "minItems"}
             assert not {"minItems", "maxItems", "minLength", "maxLength", "minimum", "maximum",
                         "pattern", "const"} & node.keys()
             if node.get("type") == "object":

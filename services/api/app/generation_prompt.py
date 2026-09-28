@@ -118,6 +118,9 @@ def _provider_schema(value: object) -> object:
     return value
 
 
+MODULE_REQUIRED_CONTENT = ("learning_objectives", "checklist_items", "tasks", "quizzes")
+
+
 def provider_output_schema() -> dict:
     """Structure hint for provider-side constrained decoding, derived from OnboardingPlan.
 
@@ -126,7 +129,12 @@ def provider_output_schema() -> dict:
     Python validator still enforce every constraint. Sent outside the template hash
     and the request-size guard, which bound only prompt text and untrusted context.
     """
-    return _provider_schema(_compact_schema(OnboardingPlan.model_json_schema()))
+    schema = _provider_schema(_compact_schema(OnboardingPlan.model_json_schema()))
+    # SRS Steps 14-21: every module must carry learning content, not an empty shell.
+    # Provider-side only; the Pydantic contract and validator are unchanged.
+    for field in MODULE_REQUIRED_CONTENT:
+        schema["$defs"]["Module"]["properties"][field]["minItems"] = 1
+    return schema
 
 
 PROVIDER_OUTPUT_SCHEMA = provider_output_schema()
