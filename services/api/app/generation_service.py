@@ -55,6 +55,38 @@ def safe_validation_diagnostics(error: ValidationError) -> tuple[dict[str, objec
     return tuple(diagnostics)
 
 
+# Pydantic renders these messages only from the schema (limits, expected literals) or from
+# our own fixed ValueError codes, never from model input. Others (e.g. uuid_parsing, which
+# quotes an input character) are logged by type only.
+_SAFE_MESSAGE_TYPES = frozenset({
+    "missing", "extra_forbidden", "literal_error", "enum", "string_too_short", "string_too_long",
+    "string_pattern_mismatch", "too_short", "too_long", "greater_than_equal", "less_than_equal",
+    "greater_than", "less_than", "string_type", "int_type", "int_from_float", "bool_type", "tuple_type",
+    "list_type", "model_type", "model_attributes_type", "dict_type", "uuid_type", "date_type", "value_error",
+})
+
+
+def _safe_path(parts) -> str:
+    """Dotted allowlisted path; unknown names and out-of-range indexes are masked."""
+    return ".".join(str(part) if isinstance(part, int) and 0 <= part <= 100
+                    else part if isinstance(part, str) and part in _SAFE_FIELD_NAMES
+                    else "unknown_field" for part in list(parts)[:16])
+
+
+def _log_schema_invalid(error: ValidationError, request_id: UUID) -> None:
+    """Log-only detail for SCHEMA_INVALID: full path, type and schema-derived message."""
+    records = []
+    for item in error.errors(include_url=False, include_context=False, include_input=False)[:20]:
+        kind = item.get("type", "unknown")
+        kind = kind if isinstance(kind, str) and re.fullmatch(r"[a-z_]{1,64}", kind) else "unknown"
+        record = {"loc": _safe_path(item.get("loc", ())), "type": kind}
+        if kind in _SAFE_MESSAGE_TYPES and isinstance(item.get("msg"), str):
+            record["msg"] = item["msg"][:200]
+        records.append(record)
+    _LOG.warning("generation_schema_invalid run_id=%s errors=%d diagnostics=%s",
+                 request_id, error.error_count(), json.dumps(records))
+
+
 class GenerationResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     status: Literal["UNVERIFIED", "FAILED", "BLOCKED"]
@@ -104,12 +136,25 @@ def _reject_constant(_value: str):
     raise StructuralFailure("MALFORMED_JSON")
 
 
-def expand_source_keys(text: str, keys: dict[str, SourceKey]) -> str:
+_UUID_TEXT = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+_KEY_TEXT = re.compile(r"S[0-9]{1,6}")
+
+
+def _safe_key(value: object) -> str:
+    """Report an S#-shaped key verbatim; anything else only by type/length, never its text."""
+    if isinstance(value, str):
+        return value if _KEY_TEXT.fullmatch(value) else f"<non_key string len={len(value)}>"
+    return f"<non_key {type(value).__name__}>"
+
+
+def expand_source_keys(text: str, keys: dict[str, SourceKey], request_id: UUID | None = None) -> str:
     """Replace S# keys with the frozen {document_version_id, chunk_id, locator}, before parse_plan.
 
     Never repairs: an unknown key, or a key that is not evidence for any of the item's own
     requirement_ids, fails as SCHEMA_INVALID with sanitized path/type diagnostics. Any
     other malformed shape is left untouched for parse_plan to reject as it does today.
+    Each rejected key is logged with its path, the item's requirement_ids and the keys
+    those requirements allow; no excerpt or other document/model text is logged.
     """
     if not text or not text.strip():
         return text
@@ -118,11 +163,12 @@ def expand_source_keys(text: str, keys: dict[str, SourceKey]) -> str:
     except (ValueError, TypeError, RecursionError):
         return text
     problems: list[dict[str, object]] = []
+    details: list[dict[str, object]] = []
 
     def safe(path: list) -> tuple:
         return tuple(part if isinstance(part, int) and 0 <= part <= 100
                      else part if isinstance(part, str) and part in _SAFE_FIELD_NAMES
-                     else "unknown_field" for part in path[:8])
+                     else "unknown_field" for part in path[:16])
 
     def walk(node: object, path: list) -> None:
         if isinstance(node, list):
@@ -134,19 +180,25 @@ def expand_source_keys(text: str, keys: dict[str, SourceKey]) -> str:
         refs = node.get("source_refs")
         if isinstance(refs, list):
             owners = node.get("requirement_ids")
-            owners = {str(item).lower() for item in owners if isinstance(item, str)} \
-                if isinstance(owners, list) else set()
+            owners = {str(item).lower() for item in owners if isinstance(item, str)}                 if isinstance(owners, list) else set()
             expanded = []
             for index, ref in enumerate(refs):
                 item = keys.get(ref) if isinstance(ref, str) else None
-                if item is None:
-                    problems.append({"loc": safe(path + ["source_refs", index]), "type": "unknown_source_key"})
-                elif not item.requirement_ids & owners:
-                    problems.append({"loc": safe(path + ["source_refs", index]),
-                                     "type": "source_key_wrong_requirement"})
-                else:
+                reason = ("unknown_source_key" if item is None
+                          else "source_key_wrong_requirement" if not item.requirement_ids & owners else None)
+                if reason is None:
                     expanded.append({"document_version_id": item.document_version_id,
                                      "chunk_id": item.chunk_id, "locator": item.locator})
+                    continue
+                loc = safe(path + ["source_refs", index])
+                problems.append({"loc": loc, "type": reason})
+                details.append({
+                    "path": _safe_path(loc), "key": _safe_key(ref), "reason": reason,
+                    "requirement_ids": sorted(owner if _UUID_TEXT.fullmatch(owner) else "<invalid>"
+                                              for owner in owners),
+                    "allowed_keys": sorted((key for key, source in keys.items() if source.requirement_ids & owners),
+                                           key=lambda key: int(key[1:])),
+                })
             node["source_refs"] = expanded
         for name, value in node.items():
             if name != "source_refs":
@@ -154,9 +206,13 @@ def expand_source_keys(text: str, keys: dict[str, SourceKey]) -> str:
 
     walk(decoded, [])
     if problems:
-        diagnostics = tuple(problems[:5])
-        _LOG.warning("generation_source_key_invalid diagnostics=%s", diagnostics)
-        raise StructuralFailure("SCHEMA_INVALID", diagnostics)
+        for detail in details[:10]:
+            _LOG.warning("generation_source_key_invalid run_id=%s path=\"%s\" key=\"%s\" reason=\"%s\" "
+                         "requirement_ids=%s allowed_keys=%s", request_id, detail["path"], detail["key"],
+                         detail["reason"], json.dumps(detail["requirement_ids"]), json.dumps(detail["allowed_keys"]))
+        _LOG.warning("generation_source_key_invalid run_id=%s total_invalid=%d logged=%d",
+                     request_id, len(details), min(len(details), 10))
+        raise StructuralFailure("SCHEMA_INVALID", tuple(problems[:5]))
     return json.dumps(decoded, ensure_ascii=False)
 
 
@@ -180,9 +236,8 @@ def parse_plan(text: str, request_id: UUID, snapshot: GenerationInputSnapshot) -
         if isinstance(exc, StructuralFailure):
             raise
         if isinstance(exc, ValidationError):
-            diagnostics = safe_validation_diagnostics(exc)
-            _LOG.warning("generation_schema_invalid request_id=%s diagnostics=%s", request_id, diagnostics)
-            raise StructuralFailure("SCHEMA_INVALID", diagnostics) from None
+            _log_schema_invalid(exc, request_id)
+            raise StructuralFailure("SCHEMA_INVALID", safe_validation_diagnostics(exc)) from None
         raise StructuralFailure("MALFORMED_JSON") from None
     if plan.generation_request_id != request_id:
         raise StructuralFailure("REQUEST_ID_MISMATCH")
@@ -287,7 +342,7 @@ async def generate_unverified(
                 if response.finish_reason != "STOP":
                     raise StructuralFailure("TRUNCATED_RESPONSE" if response.finish_reason == "MAX_TOKENS"
                                             else "PROVIDER_RESPONSE_REJECTED")
-                text = expand_source_keys(response.text, keys) if keys is not None else response.text
+                text = expand_source_keys(response.text, keys, request_id) if keys is not None else response.text
                 plan = parse_plan(text, request_id, snapshot)
             except ProviderFailure as exc:
                 code = exc.code if exc.code in SAFE_PROVIDER_ERRORS else "PROVIDER_UNAVAILABLE"

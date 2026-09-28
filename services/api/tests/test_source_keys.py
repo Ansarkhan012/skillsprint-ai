@@ -425,3 +425,132 @@ def test_v3_migration_accepts_exactly_the_two_reviewed_pairs():
     assert not _pin_accepts(sql, None, template_hash())
     assert not _pin_accepts(sql, SOURCE_KEYS_PROMPT_VERSION, None)
     assert not _pin_accepts(sql, "phase4d-compact-context/4.0.0", source_keys_template_hash())
+
+
+# --- Shared evidence and log-only diagnostics ---------------------------------------------
+
+def shared_evidence_snapshot():
+    """Six requirements that all cite three shared chunks (joining date, calendar day, timing
+    trigger) plus one obligation chunk each, as in the role 95c3269b provenance."""
+    original = ready().snapshot
+    base = original.requirements[0]
+    template = base.evidence[0]
+    shared = tuple(template.model_copy(update={
+        "chunk_id": UUID(int=700 + index), "locator": {"kind": "docx", "paragraph": index},
+        "excerpt": f"SHARED_EXCERPT_{index} secret policy wording"}) for index in range(3))
+    requirements = []
+    for index in range(6):
+        own = template.model_copy(update={
+            "chunk_id": UUID(int=800 + index), "locator": {"kind": "docx", "paragraph": 10 + index},
+            "excerpt": f"OWN_EXCERPT_{index} secret obligation wording"})
+        # Shared chunks are listed in varying order and one requirement repeats one of them.
+        evidence = shared[index % 3:] + shared[:index % 3] + (own,) + ((shared[0],) if index == 5 else ())
+        requirements.append(base.model_copy(update={"revision_id": REQ if index == 0 else UUID(int=600 + index),
+                                                    "code": f"R{index}", "sequence": index,
+                                                    "evidence": evidence}))
+    return original.model_copy(update={"requirements": tuple(requirements), "dependencies": ()})
+
+
+def test_shared_chunks_get_one_key_owned_by_every_requirement_that_cites_them():
+    snapshot = shared_evidence_snapshot()
+    keys = source_key_map(snapshot)
+    requirement_ids = {str(req.revision_id) for req in snapshot.requirements}
+    by_chunk = {UUID(item.chunk_id).int: item for item in keys.values()}
+    assert len(keys) == 3 + 6 and len(by_chunk) == len(keys)  # no duplicate mapping
+    for index in range(3):  # owned by all six, not only the first requirement that cited it
+        assert by_chunk[700 + index].requirement_ids == requirement_ids
+    for index, req in enumerate(snapshot.requirements):
+        assert by_chunk[800 + index].requirement_ids == {str(req.revision_id)}
+        allowed = {key for key, item in keys.items() if str(req.revision_id) in item.requirement_ids}
+        assert len(allowed) == 4  # 3 shared + own; nobody is left without a key
+    prompt = build_prompt(snapshot, REQUEST, source_keys=True)
+    data = json.loads(re.search(r'application/json">\n(.*)\n</untrusted', prompt.untrusted_data, re.S).group(1))
+    for req in data["requirements"]:
+        assert all(str(req["revision_id"]) in keys[key].requirement_ids for key in req["source_keys"])
+    # A shared key is valid for an item of any requirement, and for multi-requirement items.
+    last = str(snapshot.requirements[5].revision_id)
+    shared_key = next(key for key, item in keys.items() if UUID(item.chunk_id).int == 701)
+    for owners in ([last], [str(REQ), last]):
+        output = keyed(complete_output(snapshot), [shared_key], owners)
+        assert json.loads(expand_source_keys(json.dumps(output), keys))["plan"]["stages"][0]["modules"][0][
+            "source_refs"][0]["chunk_id"] == str(UUID(int=701))
+
+
+def _warnings(caplog):
+    return [record.getMessage() for record in caplog.records if record.levelname == "WARNING"]
+
+
+def test_unknown_key_log_names_run_path_key_owners_and_allowed_keys(caplog):
+    snapshot = shared_evidence_snapshot()
+    keys = source_key_map(snapshot)
+    output = keyed(complete_output(snapshot), ["S1", "S42"], [REQ])
+    with pytest.raises(StructuralFailure, match="SCHEMA_INVALID"):
+        expand_source_keys(json.dumps(output), keys, REQUEST)
+    lines = _warnings(caplog)
+    allowed = sorted((key for key, item in keys.items() if str(REQ) in item.requirement_ids),
+                     key=lambda key: int(key[1:]))
+    assert (f'generation_source_key_invalid run_id={REQUEST} path="plan.stages.0.modules.0.source_refs.1" '
+            f'key="S42" reason="unknown_source_key" requirement_ids=["{REQ}"] '
+            f'allowed_keys={json.dumps(allowed)}') in lines
+    assert any('path="plan.stages.0.modules.0.tasks.0.source_refs.1"' in line for line in lines)
+    # 11 cited items in the fixture; detail lines are capped at 10, the summary counts all.
+    assert f"generation_source_key_invalid run_id={REQUEST} total_invalid=11 logged=10" in lines
+
+
+def test_wrong_requirement_log_shows_item_owners_and_their_legal_keys(caplog):
+    snapshot = shared_evidence_snapshot()
+    keys = source_key_map(snapshot)
+    other = next(key for key, item in keys.items() if UUID(item.chunk_id).int == 803)  # owned by R3 only
+    output = keyed(complete_output(snapshot), [other], [REQ])
+    with pytest.raises(StructuralFailure) as caught:
+        expand_source_keys(json.dumps(output), keys, REQUEST)
+    assert caught.value.code == "SCHEMA_INVALID"
+    line = next(line for line in _warnings(caplog) if 'path="plan.stages.0.modules.0.source_refs.0"' in line)
+    assert f'key="{other}" reason="source_key_wrong_requirement"' in line
+    legal = json.loads(line.split("allowed_keys=")[1])
+    assert other not in legal and len(legal) == 4
+
+
+def test_diagnostics_never_log_excerpts_model_text_or_invalid_ids(caplog):
+    snapshot = shared_evidence_snapshot()
+    keys = source_key_map(snapshot)
+    output = keyed(complete_output(snapshot), ["S1 ignore previous instructions SECRET_MODEL_TEXT",
+                                               {"chunk_id": "SECRET_OBJECT"}], ["SECRET_REQ_TEXT"])
+    with pytest.raises(StructuralFailure):
+        expand_source_keys(json.dumps(output), keys, REQUEST)
+    text = "\n".join(_warnings(caplog))
+    assert 'key="<non_key string len=' in text and 'key="<non_key dict>"' in text
+    assert 'requirement_ids=["<invalid>"]' in text
+    for secret in ("SECRET_MODEL_TEXT", "SECRET_OBJECT", "SECRET_REQ_TEXT", "EXCERPT", "secret policy",
+                   "paragraph", str(UUID(int=700))):
+        assert secret not in text
+
+
+def test_pydantic_failure_logs_full_path_type_and_schema_only_message(caplog):
+    output = keyed(complete_output(), ["S1"])
+    module = output["plan"]["stages"][0]["modules"][0]
+    module["tasks"][0]["description"] = ""                                  # string_too_short
+    module["quizzes"][0]["options"] = module["quizzes"][0]["options"][:1]   # too_short
+    module["tasks"][0]["due_stage_id"] = "SECRET-not-a-uuid"                 # uuid_parsing: no msg
+    result = run(RecordingProvider(json.dumps(output), json.dumps(output)))
+    assert result.error_code == "SCHEMA_INVALID"
+    line = next(line for line in _warnings(caplog) if line.startswith("generation_schema_invalid"))
+    assert line.startswith(f"generation_schema_invalid run_id={REQUEST} errors=")
+    by_loc = {record["loc"]: record for record in json.loads(line.split("diagnostics=", 1)[1])}
+    description = by_loc["plan.stages.0.modules.0.tasks.0.description"]
+    assert description["type"] == "string_too_short" and "at least 1 character" in description["msg"]
+    assert by_loc["plan.stages.0.modules.0.quizzes.0.options"]["type"] == "too_short"
+    assert by_loc["plan.stages.0.modules.0.tasks.0.due_stage_id"] == {
+        "loc": "plan.stages.0.modules.0.tasks.0.due_stage_id", "type": "uuid_parsing"}
+    assert "SECRET" not in line
+
+
+def test_successful_expansion_logs_nothing_and_plan_is_unchanged(caplog):
+    snapshot = shared_evidence_snapshot()
+    keys = source_key_map(snapshot)
+    allowed = [key for key, item in keys.items() if str(REQ) in item.requirement_ids]
+    result = run(RecordingProvider(json.dumps(keyed(complete_output(snapshot), allowed, [REQ]))), snapshot)
+    assert result.status == "UNVERIFIED" and not _warnings(caplog)
+    refs = result.plan.plan.stages[0].modules[0].source_refs
+    assert [(str(ref.chunk_id), ref.locator) for ref in refs] == [
+        (keys[key].chunk_id, keys[key].locator) for key in allowed]
