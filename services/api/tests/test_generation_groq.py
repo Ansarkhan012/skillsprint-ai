@@ -105,7 +105,7 @@ def test_groq_request_and_strict_service_output(monkeypatch):
 
 
 @pytest.mark.parametrize("status,code,retryable", [
-    (429, "PROVIDER_RATE_LIMIT", False), (503, "PROVIDER_UNAVAILABLE", True),
+    (429, "PROVIDER_RATE_LIMIT", True), (503, "PROVIDER_UNAVAILABLE", True),
     (401, "PROVIDER_AUTH_FAILED", False), (403, "PROVIDER_AUTH_FAILED", False),
     (402, "PROVIDER_PAYMENT_REQUIRED", False),
     (400, "PROVIDER_REQUEST_FAILED", False), (404, "PROVIDER_REQUEST_FAILED", False),
@@ -126,9 +126,9 @@ def test_groq_safe_http_errors(status, code, retryable):
 
 
 @pytest.mark.parametrize("header,expected", [("1", 1.0), ("2", 2.0),
-                                              ("0", None), ("30", None),
+                                              ("0", 0.0), ("30", 30.0), ("90", None),
                                               ("garbage", None)])
-def test_groq_rate_limit_requires_short_retry_after(header, expected):
+def test_groq_rate_limit_is_retryable_with_bounded_hint(header, expected):
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(
                 lambda request: httpx.Response(429, headers={"Retry-After": header}))) as client:
@@ -136,7 +136,7 @@ def test_groq_rate_limit_requires_short_retry_after(header, expected):
                 await GroqProvider(client, config("private-test-only-key")).generate(build_prompt(ready().snapshot))
             assert error.value.code == "PROVIDER_RATE_LIMIT"
             assert error.value.retry_after_seconds == expected
-            assert error.value.retryable is (expected is not None)
+            assert error.value.retryable is True
 
     asyncio.run(scenario())
 
@@ -204,15 +204,15 @@ def test_groq_retry_budget_unchanged():
 
 
 @pytest.mark.parametrize("status,recover,expected_calls,code,delays", [
-    (408, True, 2, None, [0.25]),
-    (408, False, 3, "PROVIDER_TIMEOUT", [0.25, 0.5]),
+    (408, True, 2, None, [2.0]),
+    (408, False, 3, "PROVIDER_TIMEOUT", [2.0, 4.0]),
     (413, False, 1, "GENERATION_PROJECTION_TOO_LARGE", []),
     (401, False, 1, "PROVIDER_AUTH_FAILED", []),
     (403, False, 1, "PROVIDER_AUTH_FAILED", []),
     (404, False, 1, "PROVIDER_REQUEST_FAILED", []),
-    (429, False, 2, "PROVIDER_RATE_LIMIT", [1.0]),
-    (503, False, 3, "PROVIDER_UNAVAILABLE", [0.25, 0.5]),
-    ("timeout", False, 3, "PROVIDER_TIMEOUT", [0.25, 0.5]),
+    (429, False, 3, "PROVIDER_RATE_LIMIT", [2.0, 4.0]),
+    (503, False, 3, "PROVIDER_UNAVAILABLE", [2.0, 4.0]),
+    ("timeout", False, 3, "PROVIDER_TIMEOUT", [2.0, 4.0]),
 ])
 def test_groq_http_retry_policy_and_safe_telemetry(status, recover, expected_calls, code, delays, caplog):
     bodies, sleeps, attempts = [], [], []

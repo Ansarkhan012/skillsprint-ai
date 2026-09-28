@@ -333,15 +333,17 @@ def test_provider_failures_and_bounded_transport_retries(code, retryable):
     assert len(delays) == (2 if retryable else 0)
 
 
-def test_429_uses_only_one_short_provider_delay_then_fails_closed():
+def test_transient_failures_back_off_exponentially_max_three_attempts(caplog):
     failure = ProviderFailure("PROVIDER_RATE_LIMIT", retryable=True, retry_after_seconds=1.0)
-    provider = FakeProvider([failure, failure])
+    provider = FakeProvider([failure, failure, failure])
     result, delays = execute(provider)
     assert result.status == "FAILED" and result.error_code == "PROVIDER_RATE_LIMIT"
-    assert result.provider_calls == 2 and delays == [1.0]
-    # Even a misconfigured fake/provider cannot cause an immediate retry without a safe delay.
-    result, delays = execute(FakeProvider([ProviderFailure("PROVIDER_RATE_LIMIT", retryable=True)]))
-    assert result.provider_calls == 1 and delays == []
+    assert result.provider_calls == 3 and delays == [2.0, 4.0]
+    assert caplog.text.count("generation_provider_retry") == 2
+    # A longer Retry-After is honoured but capped; recovery succeeds on the next attempt.
+    slow = ProviderFailure("PROVIDER_UNAVAILABLE", retryable=True, retry_after_seconds=30.0)
+    result, delays = execute(FakeProvider([slow, json.dumps(complete_output())]))
+    assert result.status == "UNVERIFIED" and delays == [8.0]
 
 
 def test_transient_then_success_and_schema_regeneration_limit():

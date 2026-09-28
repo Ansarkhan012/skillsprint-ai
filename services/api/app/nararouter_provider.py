@@ -172,8 +172,7 @@ class NaraRouterProvider:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
         if response.status_code == 429:
             delay = _bounded_retry_after(response.headers.get("Retry-After"))
-            raise ProviderFailure("PROVIDER_RATE_LIMIT", retryable=delay is not None,
-                                  retry_after_seconds=delay)
+            raise ProviderFailure("PROVIDER_RATE_LIMIT", retryable=True, retry_after_seconds=delay)
         if response.status_code >= 500:
             raise ProviderFailure("PROVIDER_UNAVAILABLE", retryable=True)
         if not response.is_success:

@@ -157,7 +157,7 @@ def test_size_guard_never_calls_http(retry, kind):
     (400, 'PROVIDER_REQUEST_FAILED', False), (404, 'PROVIDER_REQUEST_FAILED', False),
     (405, 'PROVIDER_REQUEST_FAILED', False),
     (408, 'PROVIDER_TIMEOUT', True),
-    (413, 'GENERATION_PROJECTION_TOO_LARGE', False), (429, 'PROVIDER_RATE_LIMIT', False),
+    (413, 'GENERATION_PROJECTION_TOO_LARGE', False), (429, 'PROVIDER_RATE_LIMIT', True),
     (422, 'PROVIDER_REQUEST_FAILED', False),
     (500, 'PROVIDER_UNAVAILABLE', True), (503, 'PROVIDER_UNAVAILABLE', True),
 ])
@@ -199,12 +199,12 @@ def test_unrecognized_upstream_error_never_logs_raw_code_or_message(caplog):
     assert SECRET not in caplog.text and 'private prompt' not in caplog.text
 
 
-@pytest.mark.parametrize('header,expected', [('1', 1.0), ('2', 2.0), ('0', None), ('90', None), ('bad', None)])
-def test_rate_limit_uses_existing_bounded_retry(header, expected):
+@pytest.mark.parametrize('header,expected', [('1', 1.0), ('2', 2.0), ('0', 0.0), ('90', None), ('bad', None)])
+def test_rate_limit_is_retryable_with_bounded_hint(header, expected):
     with pytest.raises(ProviderFailure) as error:
         execute(lambda _: httpx.Response(429, headers={'Retry-After': header}))
     assert error.value.retry_after_seconds == expected
-    assert error.value.retryable is (expected is not None)
+    assert error.value.retryable is True
 
 
 @pytest.mark.parametrize('kind,code', [('timeout', 'PROVIDER_TIMEOUT'), ('network', 'PROVIDER_UNAVAILABLE')])
@@ -262,7 +262,7 @@ def test_redirect_does_not_forward_credentials():
     ('valid', 1, 'UNVERIFIED'), ('401', 1, 'FAILED'), ('403', 1, 'FAILED'),
     ('404', 1, 'FAILED'), ('413', 1, 'FAILED'), ('408', 3, 'FAILED'),
     ('503', 3, 'FAILED'), ('empty', 2, 'FAILED'), ('invalid-plan', 2, 'FAILED'),
-    ('429', 2, 'FAILED'),
+    ('429', 3, 'FAILED'),
 ])
 def test_service_retry_budget_and_no_fallback(monkeypatch, kind, count, status):
     async def forbidden(*args, **kwargs):

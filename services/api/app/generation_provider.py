@@ -96,11 +96,11 @@ class ProviderFailure(Exception):
 
 
 def _bounded_retry_after(value: str | None) -> float | None:
-    """Only a short numeric Retry-After can authorize one delayed 429 retry."""
+    """Numeric Retry-After hint only; the service caps the actual delay."""
     if value is None or not value.isascii() or not value.replace(".", "", 1).isdigit():
         return None
     seconds = float(value)
-    return seconds if 0.5 <= seconds <= 2.0 else None
+    return seconds if 0 <= seconds <= 60 else None
 
 
 class GenerationProvider(Protocol):
@@ -145,8 +145,7 @@ class GeminiProvider:
             raise ProviderFailure("PROVIDER_UNAVAILABLE", retryable=True) from None
         if response.status_code == 429:
             delay = _bounded_retry_after(response.headers.get("Retry-After"))
-            raise ProviderFailure("PROVIDER_RATE_LIMIT", retryable=delay is not None,
-                                  retry_after_seconds=delay)
+            raise ProviderFailure("PROVIDER_RATE_LIMIT", retryable=True, retry_after_seconds=delay)
         if response.status_code in (401, 403):
             raise ProviderFailure("PROVIDER_AUTH_FAILED")
         if response.status_code == 402:
@@ -230,8 +229,7 @@ class GroqProvider:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
         if response.status_code == 429:
             delay = _bounded_retry_after(response.headers.get("Retry-After"))
-            raise ProviderFailure("PROVIDER_RATE_LIMIT", retryable=delay is not None,
-                                  retry_after_seconds=delay)
+            raise ProviderFailure("PROVIDER_RATE_LIMIT", retryable=True, retry_after_seconds=delay)
         if response.status_code in (401, 403):
             raise ProviderFailure("PROVIDER_AUTH_FAILED")
         if response.status_code == 402:

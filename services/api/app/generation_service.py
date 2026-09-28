@@ -177,6 +177,11 @@ SAFE_PROVIDER_ERRORS = frozenset({
     "PROVIDER_RESPONSE_REJECTED", "PROVIDER_INVALID_RESPONSE", "PROVIDER_TRUNCATED",
 })
 STRUCTURAL_PROVIDER_ERRORS = {"PROVIDER_TRUNCATED", "PROVIDER_INVALID_RESPONSE"}
+# Transient 5xx/timeout/429: at most 3 attempts, exponential backoff (2s, 4s), honouring
+# a longer Retry-After up to the cap. Every attempt is persisted via on_attempt.
+MAX_TRANSPORT_RETRIES = 2
+RETRY_BASE_SECONDS = 2.0
+RETRY_MAX_SECONDS = 8.0
 
 
 async def generate_unverified(
@@ -197,7 +202,6 @@ async def generate_unverified(
                                 template_hash=prompt.template_hash)
     calls = 0
     transport_retries = 0
-    rate_limit_retries = 0
     attempt_prompt = prompt
     for format_attempt in range(2):
         first_in_format = True
@@ -221,17 +225,13 @@ async def generate_unverified(
                                           "PROVIDER_UNAVAILABLE": "UNAVAILABLE"}.get(code, "REJECTED"),
                         latency_ms=min(int((perf_counter() - started) * 1000), 600000),
                         parse_outcome="NOT_PARSED", error_code=code))
-                if (code == "PROVIDER_RATE_LIMIT" and exc.retryable
-                        and exc.retry_after_seconds is not None
-                        and 0.5 <= exc.retry_after_seconds <= 2.0
-                        and rate_limit_retries == 0 and transport_retries < 2):
-                    rate_limit_retries += 1
+                if exc.retryable and transport_retries < MAX_TRANSPORT_RETRIES:
                     transport_retries += 1
-                    await sleep(exc.retry_after_seconds)
-                    continue
-                if code != "PROVIDER_RATE_LIMIT" and exc.retryable and transport_retries < 2:
-                    transport_retries += 1
-                    await sleep(0.25 * (2 ** (transport_retries - 1)))
+                    delay = min(max(exc.retry_after_seconds or 0.0,
+                                    RETRY_BASE_SECONDS * 2 ** (transport_retries - 1)), RETRY_MAX_SECONDS)
+                    _LOG.warning("generation_provider_retry request_id=%s code=%s retry=%d/%d delay_s=%.1f",
+                                 request_id, code, transport_retries, MAX_TRANSPORT_RETRIES, delay)
+                    await sleep(delay)
                     continue
                 if code in STRUCTURAL_PROVIDER_ERRORS and format_attempt == 0:
                     break
