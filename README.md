@@ -62,8 +62,21 @@ Apply the migrations in `supabase/migrations` **once each, in filename order**, 
 Bootstrap:
 
 1. Create the first Auth user in Supabase. Insert its `profiles` row and an `ADMIN` role from the SQL editor; see `supabase/testing/bootstrap_existing_auth_user_role.sql`. Public signup cannot grant roles.
-2. Create the standard onboarding stage set (Day 1 → First 90 Days) once, as an Admin. This step has no UI button yet:
-   `POST http://127.0.0.1:8000/api/v1/onboarding-stage-sets/bootstrap` with header `Authorization: Bearer <admin access token>`.
+2. Create the standard onboarding stage set once. It has five stages: Orientation (day 0–1), Policies & Compliance (1–3), Role-Specific Training (2–5), Practical Application (4–7), and Assessment & Completion (day 7). There is no UI button, and the function requires an active Admin identity. Two options:
+
+   **Option A (Supabase SQL editor):** runs as your existing Admin profile, with no token needed. It is safe to re-run; it returns the existing set.
+
+   ```sql
+   begin;
+   select set_config('request.jwt.claims', json_build_object('role', 'authenticated', 'sub',
+     (select p.auth_user_id from public.profiles p join public.profile_roles r on r.profile_id = p.id
+       where r.role = 'ADMIN' and p.status = 'ACTIVE' order by p.created_at limit 1))::text, true);
+   set local role authenticated;
+   select public.bootstrap_standard_onboarding_stages() as stage_set_id;
+   commit;
+   ```
+
+   **Option B (API):** `POST http://127.0.0.1:8000/api/v1/onboarding-stage-sets/bootstrap` with header `Authorization: Bearer <admin access token>`.
 
 ## 5. Run
 
