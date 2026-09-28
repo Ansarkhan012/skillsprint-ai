@@ -2,11 +2,11 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { AlertCircle, Inbox, X } from "lucide-react";
+import { AlertCircle, Inbox, X, CheckCircle2, Clock3, Circle, ShieldQuestion, Ban } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { errorMessage, humanize } from "@/lib/product";
-export const panel = "rounded-md border border-border bg-card p-5 shadow-panel sm:p-6";
+import { errorMessage, humanize, needsSignIn } from "@/lib/product";
+export const panel = "workspace-panel p-5 sm:p-6";
 export const selectStyle = "h-10 w-full rounded-md border border-border bg-card px-3 text-sm";
 export function useResource<T>(load: () => Promise<T>) {
   const [data, setData] = useState<T | null>(null);
@@ -22,20 +22,21 @@ export function useResource<T>(load: () => Promise<T>) {
   return { data, error, loading, refresh: () => refresh((v) => v + 1) };
 }
 export function Loading() {
-  return <div role="status" aria-label="Loading workspace" className="space-y-4"><span className="sr-only">Loading workspace…</span>{[1, 2, 3].map((i) => <div key={i} className="h-24 animate-pulse rounded-md border border-border bg-muted motion-reduce:animate-none" />)}</div>;
+  return <div role="status" aria-label="Loading workspace" className="space-y-4"><span className="sr-only">Loading workspace…</span><div className="h-8 w-56 animate-pulse rounded-sm bg-muted motion-reduce:animate-none" />{[1, 2, 3].map((i) => <div key={i} className="h-20 animate-pulse rounded-md border border-border bg-card motion-reduce:animate-none" />)}</div>;
 }
 export function Problem({ error, retry }: { error: unknown; retry?: () => void }) {
-  return <div role="alert" className={`${panel} space-y-3 border-destructive/30`}><AlertCircle className="text-destructive" size={22} aria-hidden="true" /><p className="text-sm">{errorMessage(error)}</p><div className="flex flex-wrap gap-2">{retry && <Button variant="outline" onClick={retry}>Try again</Button>}<Button variant="ghost" asChild><Link href="/login">Sign in</Link></Button></div></div>;
+  return <div role="alert" className={`${panel} space-y-3 border-destructive/30`}><AlertCircle className="text-destructive" size={22} aria-hidden="true" /><p className="text-sm">{errorMessage(error)}</p><div className="flex flex-wrap gap-2">{retry && <Button variant="outline" onClick={retry}>Try again</Button>}{needsSignIn(error) && <Button variant="ghost" asChild><Link href="/login" prefetch={false}>Sign in</Link></Button>}</div></div>;
 }
 export function Empty({ title, children }: { title: string; children: React.ReactNode }) {
   return <div className={`${panel} flex flex-col items-start gap-3`}><Inbox className="text-muted-foreground" size={24} aria-hidden="true" /><h2 className="font-semibold">{title}</h2><div className="text-sm leading-6 text-muted-foreground">{children}</div></div>;
 }
 export function StateBadge({ value }: { value: string }) {
-  const tone = ["VERIFIED", "APPROVED", "ACTIVE"].includes(value) ? "success" : ["FAILED", "CONTRADICTORY", "UNSUPPORTED", "REJECTED"].includes(value) ? "destructive" : ["UNVERIFIED", "MANUAL_REVIEW", "VERIFIED_WITH_WARNING", "INCOMPLETE", "SUBMITTED", "RUNNING"].includes(value) ? "warning" : "neutral";
-  return <Badge tone={tone}>{humanize(value)}</Badge>;
+  const tone = ["VERIFIED", "APPROVED", "ACTIVE", "READY"].includes(value) ? "success" : ["FAILED", "CONTRADICTORY", "UNSUPPORTED", "REJECTED", "ERROR"].includes(value) ? "destructive" : ["UNVERIFIED", "MANUAL_REVIEW", "VERIFIED_WITH_WARNING", "INCOMPLETE", "NEEDS_REVIEW", "WARNING", "REVIEW", "STALE_INPUT"].includes(value) ? "warning" : ["SUBMITTED", "RUNNING", "SUBMITTING", "PROCESSING", "PARSED"].includes(value) ? "info" : "neutral";
+  const Icon = tone === "success" ? CheckCircle2 : tone === "destructive" ? Ban : tone === "warning" ? ShieldQuestion : tone === "info" ? Clock3 : Circle;
+  return <Badge tone={tone}><Icon size={12} className="shrink-0" aria-hidden="true" />{humanize(value)}</Badge>;
 }
 export function DataTable({ headers, children }: { headers: string[]; children: React.ReactNode }) {
-  return <div className="max-w-full overflow-x-auto rounded-md border border-border bg-card shadow-panel" tabIndex={0} role="region" aria-label={headers.join(", ") + " table"}><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/60 text-xs text-muted-foreground"><tr>{headers.map((h) => <th scope="col" key={h} className="whitespace-nowrap px-4 py-3 font-semibold">{h}</th>)}</tr></thead><tbody className="divide-y divide-border [&_td]:px-4 [&_td]:py-4 [&_tr:hover]:bg-muted/30">{children}</tbody></table></div>;
+  return <div className="max-w-full overflow-x-auto rounded-md border border-border bg-card" tabIndex={0} role="region" aria-label={headers.join(", ") + " table"}><table className="w-full text-left text-sm"><thead className="border-b border-border"><tr>{headers.map((h) => <th scope="col" key={h} className="whitespace-nowrap px-4 py-3.5">{h}</th>)}</tr></thead><tbody className="divide-y divide-border [&_td]:px-4 [&_td]:py-3.5 [&_tr:hover]:bg-muted/50">{children}</tbody></table></div>;
 }
 export function Pager({ offset, count, more, change, limit = 30 }: { offset: number; count: number; more: boolean; change: (offset: number) => void; limit?: number }) {
   return <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground"><span>{count ? `${offset + 1}–${offset + count}` : "0 records"} · Visible to your account</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={offset === 0} onClick={() => change(Math.max(0, offset - limit))}>Previous</Button><Button variant="outline" size="sm" disabled={!more} onClick={() => change(offset + limit)}>Next</Button></div></div>;

@@ -145,6 +145,7 @@ export function DocumentsWorkspace({ initialDocuments, departments, canUpload, c
       description="Upload, review, and trace every source version before it becomes approved ground truth."
       action={canUpload ? <Button onClick={() => { setShowUpload((value) => !value); setError(""); }}><FilePlus2 size={16} />{showUpload ? "Close upload" : "Upload document"}</Button> : undefined} />
 
+    <section className="workspace-panel overflow-hidden" aria-label="Document evidence lifecycle"><div className="border-b border-border px-5 py-3"><h2 className="text-sm font-semibold">Source evidence lifecycle</h2><p className="mt-1 text-xs text-muted-foreground">Process overview. Each version keeps its own processing and review state.</p></div><ol className="grid grid-cols-2 sm:grid-cols-4">{["Upload source", "Parse & inspect", "Review evidence", "Approve version"].map((step, index) => <li key={step} className="flex items-center gap-3 p-4 text-xs font-medium"><span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary text-primary">{index + 1}</span>{step}</li>)}</ol></section>
     {error && <ErrorMessage message={error} />}
     {notice && <p role="status" className="rounded-md border border-success/25 bg-success/5 p-3 text-sm text-success">{notice}</p>}
 
@@ -175,15 +176,15 @@ export function DocumentsWorkspace({ initialDocuments, departments, canUpload, c
       </form>
     </section>}
 
-    <section className="rounded-md border border-border bg-card shadow-panel" aria-labelledby="library-heading">
+    <section className="workspace-panel" aria-labelledby="library-heading">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5">
-        <div><h2 id="library-heading" className="text-lg font-semibold">Document library</h2><p className="text-sm text-muted-foreground">{visible.length} visible on this page · records {documentPage.offset + 1}–{documentPage.offset + documents.length}. Search and filters apply to this page.</p></div>
+        <div><h2 id="library-heading" className="text-lg font-semibold">Document library</h2><p className="text-sm text-muted-foreground">{visible.length} visible on this page · records {documents.length ? documentPage.offset + 1 : 0}–{documentPage.offset + documents.length}. Search and filters apply to this page.</p></div>
         <div className="flex w-full flex-wrap gap-2 sm:w-auto">
           <label className="relative min-w-48 flex-1 sm:flex-none"><span className="sr-only">Search documents</span><Search size={16} className="absolute left-3 top-3 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search title or code" className="pl-9" /></label>
           <label><span className="sr-only">Filter status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-10 rounded-md border border-border bg-card px-3 text-sm"><option value="ALL">All statuses</option><option value="DRAFT">Draft</option><option value="SUBMITTED">Submitted</option><option value="APPROVED">Approved</option><option value="NEEDS_REVIEW">Needs review</option><option value="FAILED">Failed</option></select></label>
         </div>
       </div>
-      {visible.length ? <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm">
+      {visible.length ? <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Document library table"><table className="w-full min-w-[760px] text-left text-sm">
         <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground"><tr><th scope="col" className="px-5 py-3">Document</th><th scope="col" className="px-4 py-3">Category</th><th scope="col" className="px-4 py-3">Department</th><th scope="col" className="px-4 py-3">Version</th><th scope="col" className="px-4 py-3">Status</th><th scope="col" className="px-4 py-3">Effective</th><th scope="col" className="px-4 py-3">Action</th></tr></thead>
         <tbody>{visible.map((item) => { const version = latestVersion(item); return <tr key={item.id} className="border-t border-border align-top"><td className="px-5 py-4"><span className="block font-semibold">{item.title}</span><span className="text-xs text-muted-foreground">{item.document_code}</span></td><td className="px-4 py-4">{item.category}</td><td className="px-4 py-4">{departments.find((department) => department.id === item.department_id)?.name ?? "General"}</td><td className="px-4 py-4">{version?.version_label ?? "—"}</td><td className="px-4 py-4">{version ? <DocumentBadge status={version.review_status === "DRAFT" && version.parse_status !== "PARSED" ? version.parse_status : version.review_status} /> : "—"}</td><td className="px-4 py-4">{version?.effective_date ?? "—"}</td><td className="px-4 py-4"><Button type="button" variant="outline" size="sm" onClick={() => openDocument(item.id)}>View details</Button></td></tr>; })}</tbody>
       </table></div> : <div className="p-6"><EmptyState icon={FileText} title="No documents match" description="Try another filter, or upload a source document if your role permits it." /></div>}

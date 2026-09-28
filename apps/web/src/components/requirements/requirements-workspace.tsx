@@ -18,7 +18,7 @@ type Props = { me: Me; roles: JobRole[]; departments: Department[]; initialRoleI
 type Pane = "candidates" | "matrix" | "ground-truth";
 
 const selectClass = "h-10 w-full rounded-md border border-border bg-card px-3 text-sm";
-const boxClass = "rounded-md border border-border bg-card p-5 shadow-panel";
+const boxClass = "workspace-panel p-5 sm:p-6";
 const emptyPage = <T,>(): Page<T> => ({ items: [], offset: 0, limit: 50, has_more: false });
 
 function Status({ value }: { value: string }) {
@@ -279,6 +279,7 @@ export function RequirementsWorkspace({ me, roles, departments, initialRoleId }:
   return <div className="space-y-7">
     <PageHeader eyebrow="Approved ground truth" title="Requirement Matrix"
       description="Turn approved document evidence into independently reviewed role requirements." />
+    <section className="workspace-panel border-l-4 border-l-primary p-5"><h2 className="font-semibold">The evidence behind every plan</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">Approved structured requirements are the ground truth supplied to AI. Review candidates against source evidence, define role applicability and dependencies, then approve a matrix revision.</p></section>
     {error && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
     {notice && <p role="status" className="rounded-md border border-success/30 bg-success/5 p-3 text-sm text-success">{notice}</p>}
     <div className="grid gap-3 sm:grid-cols-3">
@@ -287,13 +288,13 @@ export function RequirementsWorkspace({ me, roles, departments, initialRoleId }:
       <div className={boxClass}><p className="text-xs uppercase text-muted-foreground">Awaiting review</p><p className="mt-2 text-2xl font-semibold">{submittedCount}</p></div>
     </div>
     <div className="flex flex-wrap items-end gap-3">
-      <label className="min-w-64 space-y-1 text-sm font-semibold">Job role
+      <label className="w-full sm:w-auto sm:min-w-64 space-y-1 text-sm font-semibold">Job role
         <select className={selectClass} value={roleId} onChange={(event) => { setRoleId(event.target.value); setMatrix(null); setGroundTruth(null); }}>
           {roles.map((role) => <option key={role.id} value={role.id}>{role.code} · {role.name}</option>)}
         </select>
       </label>
       <nav className="flex flex-wrap gap-2" aria-label="Requirement workspace">
-        {(["matrix", "candidates", "ground-truth"] as const).map((tab) => <Button key={tab} variant={pane === tab ? "primary" : "outline"} onClick={() => setPane(tab)}>
+        {(["matrix", "candidates", "ground-truth"] as const).map((tab) => <Button key={tab} aria-pressed={pane === tab} variant={pane === tab ? "primary" : "outline"} onClick={() => setPane(tab)}>
           {tab === "matrix" ? "Role matrices" : tab === "candidates" ? "Candidates" : "Ground truth"}
         </Button>)}
       </nav>

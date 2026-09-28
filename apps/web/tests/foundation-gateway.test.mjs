@@ -60,6 +60,19 @@ async function post(gateway, path, options) {
   return gateway.POST(request(path, options), { params: Promise.resolve({ path: path.split("/") }) });
 }
 
+test("generation errors preserve status and proof without redirect or session invalidation", async () => {
+  for (const status of [401,403,409,422,500,503]) {
+    const body = { code: "SAFE_ERROR", ...(status === 422 ? { generation_retry_safe: true } : {}) };
+    const { gateway, calls } = loadGateway({ upstreamStatus: status, upstreamBody: body });
+    const response = await post(gateway, "generation-runs", { body: { employee_id: "00000000-0000-0000-0000-000000000001" }, headers: { "Idempotency-Key": "test-key-123" } });
+    assert.equal(response.status, status);
+    assert.deepEqual(await response.json(), body);
+    assert.equal(response.headers.get("location"), null);
+    assert.equal(response.headers.get("set-cookie"), null);
+    assert.equal(calls.length, 1);
+  }
+});
+
 async function get(gateway, path) {
   const url = `http://localhost:3000/api/document-gateway/${path}`;
   const req = new Request(url);

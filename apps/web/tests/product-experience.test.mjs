@@ -14,23 +14,94 @@ const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src");
 const cache = new Map();
 function load(file) {
-  if (cache.has(file)) return cache.get(file);
   const full = [file, file + ".ts", file + ".tsx"].find(existsSync);
   assert.ok(full, file);
+  if (cache.has(full)) return cache.get(full);
   const exports = {};
   const code = ts.transpileModule(readFileSync(full, "utf8"), { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
   vm.runInNewContext(code, { exports, crypto: webcrypto, console, require(name) {
-    if (name === "next/link") return { __esModule: true, default: ({ href, children, ...props }) => React.createElement("a", { href, ...props }, children) };
+    if (name === "next/link") return { __esModule: true, default: ({ href, children, prefetch: _prefetch, ...props }) => React.createElement("a", { href, ...props }, children) };
     if (name === "next/navigation") return { useRouter: () => ({}), usePathname: () => "/app/dashboard" };
     if (name === "@/lib/supabase/browser") return { createClient: () => { throw Error("No auth side effects in render"); } };
     if (name.startsWith("@/")) return load(path.join(root, name.slice(2)));
     if (name.startsWith(".")) return load(path.resolve(path.dirname(full), name));
     return require(name);
   } }, { filename: full });
-  cache.set(file, exports); return exports;
+  cache.set(full, exports); return exports;
 }
 const product = load(path.join(root, "lib/product.ts"));
 const me = (role) => ({ id: "actor", display_name: "Test account", roles: [role] });
+
+test("trust panel never implies verification without an independent result", () => {
+  const { TrustPanel } = load(path.join(root, "components/product/intelligence"));
+  const html = renderToStaticMarkup(React.createElement(TrustPanel));
+  assert.match(html, /No validation result recorded/);
+  assert.match(html, /Awaiting independent validation/);
+  assert.doesNotMatch(html, /<progress/);
+});
+
+test("run signals distinguish unavailable data from an empty loaded page", () => {
+  const { RunSignals } = load(path.join(root, "components/product/intelligence"));
+  const render = props => renderToStaticMarkup(React.createElement(RunSignals, props));
+  assert.match(render({ runs: null, validations: null }), /Generation history is unavailable/);
+  assert.match(render({ runs: [], validations: [] }), /Your first plan starts with approved evidence/);
+  const html = render({ runs: [{ id: "failed-run", status: "FAILED", created_at: "2026-09-27T00:00:00Z", matrix_revision: 1 }], validations: [] });
+  assert.match(html, /href="\/app\/plans\/failed-run"/);
+  assert.match(html, /Failed/);
+  assert.match(html, /width:100%/);
+});
+
+test("workflow overview makes human control explicit without claiming completion", () => {
+  const { WorkflowRail } = load(path.join(root, "components/product/intelligence"));
+  const html = renderToStaticMarkup(React.createElement(WorkflowRail));
+  for (const label of ["Ground truth", "Python validation", "JEV decision", "Human review", "not a completion indicator"]) assert.ok(html.includes(label));
+});
+
+test("only genuine 401 offers sign-in; generation errors never render login navigation", () => {
+  const { Problem } = load(path.join(root, "components/product/common"));
+  for (const status of [401, 403, 409, 422, 500, 503]) {
+    const error = new product.ProductError(status, "SAFE_ERROR");
+    const html = renderToStaticMarkup(React.createElement(Problem, { error }));
+    assert.equal(html.includes('href="/login"'), status === 401);
+    assert.equal(product.needsSignIn(error), status === 401);
+  }
+});
+
+test("proven pre-provider 422 releases only its own lock; valid request shape is preserved", async () => {
+  const values = new Map();
+  const storage = { getItem: k => values.get(k), setItem: (k,v) => values.set(k,v), removeItem: k => values.delete(k) };
+  let calls = 0;
+  const employee = "00000000-0000-0000-0000-000000000001";
+  const send = async (route, body, headers) => {
+    calls++;
+    assert.equal(route, "generation-runs");
+    assert.deepEqual(JSON.parse(JSON.stringify(body)), { employee_id: employee });
+    assert.match(headers["Idempotency-Key"], /^[A-Za-z0-9_-]{8,128}$/);
+    throw new product.ProductError(422, "GEN4_INVALID_INPUT", true);
+  };
+  await assert.rejects(product.generateOnce(storage, "lock", employee, send));
+  assert.equal(calls, 1); assert.equal(storage.getItem("lock"), undefined);
+});
+
+test("uncertain 422, auth, conflict and service errors retain duplicate protection", async () => {
+  for (const status of [401,403,409,422,503]) {
+    const values = new Map();
+    const storage = { getItem: k => values.get(k), setItem: (k,v) => values.set(k,v), removeItem: k => values.delete(k) };
+    let calls = 0;
+    const send = async () => { calls++; throw new product.ProductError(status, "SAFE_ERROR"); };
+    await assert.rejects(product.generateOnce(storage, "lock", "employee", send));
+    await assert.rejects(product.generateOnce(storage, "lock", "employee", send));
+    assert.equal(calls, 1); assert.ok(storage.getItem("lock"));
+  }
+});
+
+test("successful generation retains duplicate protection", async () => {
+  const values = new Map(); const storage = { getItem: k => values.get(k), setItem: (k,v) => values.set(k,v) };
+  let calls = 0; const send = async () => { calls++; return { id: "run" }; };
+  await product.generateOnce(storage, "lock", "employee", send);
+  await assert.rejects(product.generateOnce(storage, "lock", "employee", send));
+  assert.equal(calls, 1);
+});
 
 test("all five roles have coherent navigation; debug and unsupported user CRUD are absent", () => {
   const { navigation, canAccess } = load(path.join(root, "components/layout/navigation.ts"));

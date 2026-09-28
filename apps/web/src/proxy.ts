@@ -17,12 +17,20 @@ export async function proxy(request: NextRequest) {
       },
     },
   });
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user }, error } = await supabase.auth.getUser();
+  // An auth service outage is not evidence that the session is invalid.
+  if (error && error.name !== "AuthSessionMissingError" && ![400, 401, 403].includes(error.status ?? 0)) {
+    const unavailable = new NextResponse("Authentication service temporarily unavailable. Please retry.", { status: 503 });
+    response.cookies.getAll().forEach((cookie) => unavailable.cookies.set(cookie));
+    return unavailable;
+  }
   if (!user && request.nextUrl.pathname.startsWith("/app")) {
     const target = request.nextUrl.clone();
     target.pathname = "/login";
     target.searchParams.set("next", request.nextUrl.pathname);
-    return NextResponse.redirect(target);
+    const redirectResponse = NextResponse.redirect(target);
+    response.cookies.getAll().forEach((cookie) => redirectResponse.cookies.set(cookie));
+    return redirectResponse;
   }
   if (user && request.nextUrl.pathname === "/login") {
     const redirectResponse = NextResponse.redirect(new URL("/app/dashboard", request.url));

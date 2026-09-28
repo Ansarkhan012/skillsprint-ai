@@ -8,11 +8,12 @@ export type PlanModule = { module_id: string; title: string; purpose: string; ca
 export type Run = { id: string; employee_id: string; employee_profile_id?: string | null; created_by: string; status: string; error_code: string | null; created_at: string; provider: string; model: string; prompt_version: string; schema_version: string; matrix_id: string; matrix_revision: number; stage_set_version: number; input_hash?: string; projection_hash?: string; template_hash?: string; attempts?: Array<{ attempt_no: number; attempt_type: string; provider_outcome: string; parse_outcome: string; error_code: string | null }>; plan?: { id: string; status: string; schema_version: string; content: { plan: { title: string; summary: string; stages: Array<{ stage_id: string; label: string; sequence: number; target_start_day: number; target_end_day: number; modules: PlanModule[] }> }; insufficient_information?: Array<{ request_path: string; topic: string; reason_code: string; detail: string; requirement_id?: string | null }> } } | null };
 export type Finding = { id: string; code: string; severity: string; requirement_id: string | null; location: string; explanation: string; evidence: SourceRef[] };
 export type Validation = { id: string; generated_plan_id: string; validator_version: string; completed_at: string; summary: { mandatory_total: number; mandatory_covered: number; finding_count: number }; jev_decisions?: { status: string }; decision?: { status: string; jev_version: string }; plan_context?: Pick<Run, "id" | "employee_id" | "employee_profile_id" | "created_by"> | null; findings?: Finding[]; review_actions?: Array<{ id: string; action: string; reason: string; actor_profile_id: string; created_at: string }>; review_actions_has_more?: boolean };
-export class ProductError extends Error { constructor(public status: number, public code: string) { super(code); } }
+export class ProductError extends Error { constructor(public status: number, public code: string, public generationRetrySafe = false) { super(code); } }
+export const needsSignIn = (error: unknown) => error instanceof ProductError && error.status === 401;
 export async function productRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/document-gateway/${path}`, { ...init, credentials: "same-origin", cache: "no-store" });
   const body = await response.json().catch(() => null);
-  if (!response.ok) throw new ProductError(response.status, typeof body?.code === "string" && /^[A-Z0-9_]+$/.test(body.code) ? body.code : "REQUEST_FAILED");
+  if (!response.ok) throw new ProductError(response.status, typeof body?.code === "string" && /^[A-Z0-9_]+$/.test(body.code) ? body.code : "REQUEST_FAILED", body?.generation_retry_safe === true);
   return body as T;
 }
 export function postProduct<T>(path: string, body: unknown, headers?: Record<string, string>) {
@@ -50,11 +51,17 @@ export function timingLabel(timing: Record<string, unknown>) {
   return `${original}${timing.state === "AMBIGUOUS" ? " · Manual review required" : " · Evidence-backed timing"}`;
 }
 
-/** Store the attempt before sending. A failed or uncertain request must not auto-repeat. */
-export async function generateOnce<T>(storage: Pick<Storage, "getItem" | "setItem">, key: string, employeeId: string,
+/** Store before sending; release only an explicitly proven pre-generation rejection. */
+export async function generateOnce<T>(storage: Pick<Storage, "getItem" | "setItem"> & Partial<Pick<Storage, "removeItem">>, key: string, employeeId: string,
   send: (path: string, body: unknown, headers: Record<string, string>) => Promise<T>) {
   if (storage.getItem(key)) throw new ProductError(409, "GENERATION_ALREADY_ATTEMPTED");
   const idempotencyKey = crypto.randomUUID();
   storage.setItem(key, idempotencyKey);
-  return send("generation-runs", { employee_id: employeeId }, { "Idempotency-Key": idempotencyKey });
+  try {
+    return await send("generation-runs", { employee_id: employeeId }, { "Idempotency-Key": idempotencyKey });
+  } catch (error) {
+    if (error instanceof ProductError && error.status === 422 && error.generationRetrySafe
+        && storage.getItem(key) === idempotencyKey) storage.removeItem?.(key);
+    throw error;
+  }
 }

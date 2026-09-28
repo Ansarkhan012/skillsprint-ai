@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, FileText, Users, ShieldCheck, LibraryBig } from "lucide-react";
+import { FileText, Users, ShieldCheck, LibraryBig } from "lucide-react";
 import type { Me } from "@/lib/api";
 import { canReadGeneration, humanize, productRequest, type Page, type Run, type Employee, type Validation } from "@/lib/product";
 import type { CompanyDocument } from "@/lib/documents";
@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { DataTable, Empty, Loading, Pager, Problem, StateBadge, panel, useResource } from "./common";
 
-const workflow = ["Source documents", "Approved ground truth", "Employee context", "AI generation", "Python validation", "JEV decision", "Human review"];
+import { WorkflowRail, RunSignals } from "./intelligence";
 export function Overview({ me, reports = false }: { me: Me; reports?: boolean }) {
   const [offset, setOffset] = useState(0);
   const knowledge = canReadGeneration(me), people = me.roles.some((r) => r !== "EMPLOYEE");
@@ -24,14 +24,15 @@ export function Overview({ me, reports = false }: { me: Me; reports?: boolean })
       errors: [documents, employees, runs, validations].filter((r) => r.status === "rejected").length };
   }, [knowledge, people, offset]);
   const state = useResource(load), data = state.data;
-  return <div className="space-y-7"><PageHeader eyebrow={reports ? "Insights" : "Overview"} title={reports ? "Operational reports" : `Welcome, ${me.display_name}`} description={reports ? "Counts and records from the currently loaded, authorized data pages. These are not organization-wide totals." : "Move from approved evidence to accountable onboarding, with human oversight at every decision."} action={<Button variant="outline" onClick={state.refresh}>Refresh data</Button>} />
-    {!reports && <section className={panel}><h2 className="mb-4 text-sm font-semibold">Your onboarding workflow</h2><ol className="flex flex-wrap gap-x-3 gap-y-4">{workflow.map((step, i) => <li key={step} className="flex items-center gap-3 text-xs"><span className="flex size-6 items-center justify-center rounded-full bg-secondary font-bold text-primary">{i + 1}</span><span>{step}</span>{i < workflow.length - 1 && <ArrowRight size={12} className="text-muted-foreground" aria-hidden="true" />}</li>)}</ol></section>}
+  return <div className="space-y-7"><PageHeader eyebrow={reports ? "Insights" : "SkillSprint AI"} title={reports ? "Operational reports" : "Grounded Employee Onboarding Intelligence"} description={reports ? "Counts and records from the currently loaded, authorized data pages. These are not organization-wide totals." : `Company documents become approved ground truth. AI drafts a role-aware onboarding plan, independent Python checks its evidence, and people retain final control. Welcome, ${me.display_name}.`} action={<Button variant="outline" onClick={state.refresh}>Refresh data</Button>} />
+    {!reports && <WorkflowRail />}
     {state.loading ? <Loading /> : state.error ? <Problem error={state.error} retry={state.refresh} /> : data && <>
       {data.errors > 0 && <div role="alert" className={`${panel} text-sm`}>Some data could not be loaded. Unavailable counts are shown as “Unavailable”, never as zero. <Button variant="outline" size="sm" onClick={state.refresh}>Retry data</Button></div>}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[
+      <div className="grid overflow-hidden rounded-md border border-border bg-card sm:grid-cols-2 xl:grid-cols-4">{[
         ...(knowledge ? [{ label: "Documents", count: data.documents?.items.length, icon: FileText, href: "/app/documents" }, { label: "Generation runs", count: data.runs?.items.length, icon: LibraryBig, href: "/app/plans" }, { label: "Validation results", count: data.validations?.items.length, icon: ShieldCheck, href: "/app/reviews" }] : []),
         ...(people ? [{ label: "Employees", count: data.employees?.length, icon: Users, href: "/app/employees" }] : []),
-      ].map(({ label, count, icon: Icon, href }) => <Link href={href} key={label} className={`${panel} hover:border-primary/40`}><div className="flex items-center justify-between text-sm text-muted-foreground"><span>{label}</span><Icon size={19} aria-hidden="true" /></div><p className="mt-4 text-3xl font-semibold">{count ?? "Unavailable"}</p><p className="mt-2 text-xs text-muted-foreground">Loaded page · up to 30 records</p></Link>)}</div>
+      ].map(({ label, count, icon: Icon, href }) => <Link href={href} key={label} className="group relative border-b border-r border-border p-5 transition-colors hover:bg-muted/50 sm:p-6"><div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"><span>{label}</span><Icon size={17} aria-hidden="true" /></div><p className="metric-value mt-5 text-3xl font-semibold">{count ?? "Unavailable"}</p><p className="mt-2 text-xs text-muted-foreground">Authorized page · up to 30 records</p></Link>)}</div>
+      {knowledge && <RunSignals runs={data.runs?.items ?? null} validations={data.validations?.items ?? null} />}
       {!people && <Empty title="Your employee workspace">Your account is active. Contact your Training Manager for your onboarding assignment. Generation drafts and review evidence are restricted to authorized authors and reviewers.<div className="mt-4"><Button asChild variant="outline"><Link href="/app/settings">View your account</Link></Button></div></Empty>}
       {knowledge && <div className="grid gap-5 xl:grid-cols-2"><section className={`${panel} space-y-4`}><div className="flex items-center justify-between"><h2 className="font-semibold">Recent documents</h2><Link href="/app/documents" className="text-sm text-primary hover:underline">Open library</Link></div>{data.documents === null ? <p className="text-sm">Document data unavailable.</p> : !data.documents.items.length ? <p className="text-sm text-muted-foreground">No documents in this page. Open the library to upload or review source evidence.</p> : data.documents.items.slice(0, 5).map((d) => <div key={d.id} className="border-t border-border pt-3"><p className="text-sm font-medium">{d.title}</p><p className="mt-1 text-xs text-muted-foreground">{d.document_code} · {humanize(d.category)}</p></div>)}</section>
       <section className={`${panel} space-y-4`}><div className="flex items-center justify-between"><h2 className="font-semibold">Validation decisions</h2><Link href="/app/reviews" className="text-sm text-primary hover:underline">Review evidence</Link></div>{data.validations === null ? <p className="text-sm">Validation data unavailable.</p> : !data.validations.items.length ? <p className="text-sm text-muted-foreground">No validation runs in this page. Only accepted generated plans can enter validation.</p> : data.validations.items.slice(0, 5).map((v) => <Link href={`/app/reviews/${v.id}`} key={v.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3"><StateBadge value={v.jev_decisions?.status ?? "UNKNOWN"} /><span className="text-xs">{v.summary.finding_count} findings · {new Date(v.completed_at).toLocaleDateString()}</span></Link>)}</section></div>}
