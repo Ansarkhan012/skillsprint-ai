@@ -107,6 +107,7 @@ def test_groq_request_and_strict_service_output(monkeypatch):
     (429, "PROVIDER_RATE_LIMIT", False), (503, "PROVIDER_UNAVAILABLE", True),
     (401, "PROVIDER_AUTH_FAILED", False), (403, "PROVIDER_AUTH_FAILED", False),
     (400, "PROVIDER_REQUEST_FAILED", False), (404, "PROVIDER_REQUEST_FAILED", False),
+    (408, "PROVIDER_TIMEOUT", True), (413, "GENERATION_PROJECTION_TOO_LARGE", False),
 ])
 def test_groq_safe_http_errors(status, code, retryable):
     secret = "private-test-only-key"
@@ -198,3 +199,51 @@ def test_groq_retry_budget_unchanged():
 
     asyncio.run(scenario())
     assert len(calls) == 3
+
+
+@pytest.mark.parametrize("status,recover,expected_calls,code,delays", [
+    (408, True, 2, None, [0.25]),
+    (408, False, 3, "PROVIDER_TIMEOUT", [0.25, 0.5]),
+    (413, False, 1, "GENERATION_PROJECTION_TOO_LARGE", []),
+    (401, False, 1, "PROVIDER_AUTH_FAILED", []),
+    (403, False, 1, "PROVIDER_AUTH_FAILED", []),
+    (404, False, 1, "PROVIDER_REQUEST_FAILED", []),
+    (429, False, 2, "PROVIDER_RATE_LIMIT", [1.0]),
+    (503, False, 3, "PROVIDER_UNAVAILABLE", [0.25, 0.5]),
+    ("timeout", False, 3, "PROVIDER_TIMEOUT", [0.25, 0.5]),
+])
+def test_groq_http_retry_policy_and_safe_telemetry(status, recover, expected_calls, code, delays, caplog):
+    bodies, sleeps, attempts = [], [], []
+    private_body = "private-provider-body private-test-only-key"
+
+    def handler(request):
+        bodies.append(request.content)
+        if recover and len(bodies) > 1:
+            return httpx.Response(200, json={"choices": [{"finish_reason": "stop",
+                "message": {"content": json.dumps(complete_output())}}]})
+        if status == "timeout":
+            raise httpx.ReadTimeout(private_body, request=request)
+        return httpx.Response(status, text=private_body, headers={"Retry-After": "1"})
+
+    async def sleep(delay):
+        sleeps.append(delay)
+
+    async def record(attempt):
+        attempts.append(attempt)
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await generate_unverified(ready(), REQUEST, GroqProvider(client, config()),
+                                               sleep=sleep, on_attempt=record)
+        assert result.status == ("UNVERIFIED" if recover else "FAILED")
+        assert result.error_code == code
+        assert result.provider_calls == expected_calls
+        safe_output = result.model_dump_json() + ''.join(a.model_dump_json() for a in attempts) + caplog.text
+        assert private_body not in safe_output
+        assert "private-test-only-key" not in safe_output
+
+    asyncio.run(scenario())
+    assert len(bodies) == len(attempts) == expected_calls
+    assert sleeps == delays
+    assert all(body == bodies[0] for body in bodies)  # No truncation or format retry.
+    assert all(a.attempt_type == "TRANSPORT_RETRY" for a in attempts[1:])

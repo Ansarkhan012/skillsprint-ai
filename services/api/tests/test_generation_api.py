@@ -104,6 +104,53 @@ def post(client, key="test-key-123"):
                        headers={"Idempotency-Key": key})
 
 
+@pytest.mark.parametrize("body,headers,code", [
+    ({"employee_id": "invalid"}, {"Idempotency-Key": "valid-key-123"}, "INVALID_REQUEST"),
+    ({"employee_id": str(EMP)}, {}, "INVALID_REQUEST"),
+    ({"employee_id": str(EMP)}, {"Idempotency-Key": "bad"}, "INVALID_IDEMPOTENCY_KEY"),
+])
+def test_generation_request_rejection_proves_no_provider_call(setup, body, headers, code):
+    client, store, provider = setup
+    response = client.post("/api/v1/generation-runs", json=body, headers=headers)
+    assert response.status_code == 422
+    assert response.json()["code"] == code
+    assert response.json()["generation_retry_safe"] is True
+    assert provider.calls == 0 and not store.calls
+
+
+@pytest.mark.parametrize("status,code,safe", [
+    (422, "GEN4_INVALID_INPUT", True),
+    (422, "GENERATION_INVALID_INPUT", True),
+    (409, "GEN4_IDEMPOTENCY_CONFLICT", False),
+    (503, "GENERATION_DATA_UNAVAILABLE", False),
+])
+def test_ready_valid_request_reservation_rejection_is_not_auth_failure(setup, monkeypatch, status, code, safe):
+    client, store, provider = setup
+    assert client.get(f"/api/v1/generation-runs/preflight/{EMP}").json()["readiness"] == "READY"
+    async def reject(token, payload):
+        assert payload["p_employee"] == str(EMP)
+        assert payload["p_prompt_version"] == "phase4d-compact-context/2.0.0"
+        assert payload["p_template_hash"] == generation_prompt.template_hash()
+        raise HTTPException(status, code)
+    monkeypatch.setattr(store, "reserve", reject)
+    response = post(client)
+    assert response.status_code == status
+    assert response.json().get("generation_retry_safe", False) is safe
+    assert response.json()["code"] == code
+    assert provider.calls == 0 and not store.attempts
+
+
+def test_post_provider_422_never_releases_browser_lock(setup, monkeypatch):
+    client, store, provider = setup
+    async def reject(*args):
+        raise HTTPException(422, "GEN4_INVALID_FINISH")
+    monkeypatch.setattr(store, "finish", reject)
+    response = post(client)
+    assert response.status_code == 422
+    assert "generation_retry_safe" not in response.json()
+    assert provider.calls > 0  # Fake provider only: a 422 alone cannot prove zero calls.
+
+
 def test_read_only_preflight_uses_real_context_without_provider_or_persistence(setup, monkeypatch):
     client, store, provider = setup
     monkeypatch.setattr(generation_api, "get_provider_bundle",

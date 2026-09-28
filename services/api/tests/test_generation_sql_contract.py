@@ -3,7 +3,7 @@
 from pathlib import Path
 import re
 
-from app.generation_prompt import PROMPT_VERSION, SCHEMA_VERSION, template_hash
+from app.generation_prompt_v1 import PROMPT_VERSION, SCHEMA_VERSION, template_hash
 
 
 SQL = (Path(__file__).resolve().parents[3] / "supabase" / "migrations" /

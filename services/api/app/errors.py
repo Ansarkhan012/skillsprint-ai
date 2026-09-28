@@ -15,6 +15,7 @@ def problem(status: int, code: str, detail: str, request: Request) -> JSONRespon
             "detail": detail,
             "instance": str(request.url.path),
             "correlation_id": getattr(request.state, "correlation_id", None),
+            **({"generation_retry_safe": True} if getattr(request.state, "generation_retry_safe", False) else {}),
         },
     )
 
@@ -27,4 +28,6 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        if request.method == "POST" and request.url.path == "/api/v1/generation-runs":
+            request.state.generation_retry_safe = True
         return problem(422, "INVALID_REQUEST", "Request fields did not pass validation.", request)

@@ -172,7 +172,7 @@ def test_projection_preserves_all_required_fields_without_audit_metadata():
     assert projection["employee"]["employee_id"] == str(EMP)
     assert projection["requirements"][0]["revision_id"] == str(REQ)
     assert projection["requirements"][0]["source_refs"][0]["chunk_id"] == str(CHUNK)
-    assert projection["requirements"][0]["timing"] == snapshot.requirements[0].timing.model_dump(mode="json")
+    assert projection["requirements"][0]["timing"] == snapshot.requirements[0].timing.model_dump(mode="json", exclude={"evidence", "original_text"}, exclude_none=True)
     assert projection["dependencies"] == []
     assert projection["stages"][0]["stage_id"] == str(STAGE)
     for forbidden in ("profile_id", "as_of", "matrix_lock_version", "matrix_snapshot_hash",
@@ -236,11 +236,11 @@ def test_exact_output_contract_and_golden_version_for_controlled_fixture():
     for node in [expected, *expected["$defs"].values()]:
         node["required"] = sorted(node.get("required", []))
     assert schema == expected  # exact fields/types/enums/bounds/requiredness, not approximate prose
-    assert PROMPT_VERSION == "phase4d-compact-exact-output/1.0.0"
-    assert PROJECTION_VERSION == "generation-projection/1.1.0"
-    assert template_hash() == "ed734c3b6d71d456bbd5114c63cc945ae7147f07d4a3a41e72ec284abea6c7c1"
+    assert PROMPT_VERSION == "phase4d-compact-context/2.0.0"
+    assert PROJECTION_VERSION == "generation-projection/2.0.0"
+    assert template_hash() == "11b1127daf611a0d6739c185f9815570cff9abd29e73bcee7117121daf85abbc"
     assert prompt.template_hash == template_hash()
-    assert prompt.projection_hash == "a7516e020f9ac82ad56cbebe43eac18c23a95e2abcb96d090c4bfe517ed283dd"
+    assert prompt.projection_hash == "d6c08db160df6dc1ccdc6db4728d117989ae4ecdf88b4fd1d9b700e08375cf5f"
     assert schema["additionalProperties"] is False
     assert set(schema["required"]) == {"schema_version", "generation_request_id", "employee_context", "plan"}
     assert schema["properties"]["schema_version"]["const"] == "onboarding-plan/1.0.0"

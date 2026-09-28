@@ -133,7 +133,8 @@ def test_h11_ambiguous_promptly_does_not_acquire_a_deadline():
     req = frozen.requirements[0].model_copy(update={"timing": Timing(state="AMBIGUOUS", original_text="Complete promptly after joining.")})
     frozen = frozen.model_copy(update={"requirements": (req, *frozen.requirements[1:])})
     projected = generation_projection(frozen)["requirements"][0]["timing"]
-    assert projected["value"] is None and projected["trigger"] is None
+    assert "value" not in projected and "trigger" not in projected
+    assert projected["original_text"] == "Complete promptly after joining."
     evidence, decision = check(plan, frozen)
     assert decision.status == "MANUAL_REVIEW"
     assert "TIMING_UNRESOLVED" in {f.code for f in evidence.findings}

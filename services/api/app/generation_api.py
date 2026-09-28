@@ -15,6 +15,7 @@ from .generation_prompt import PROMPT_VERSION, SCHEMA_VERSION, build_prompt, tem
 from .generation_provider import (GeminiEnvironment, GeminiProvider, GroqEnvironment, GroqProvider,
                                   GenerationProvider, ProviderConfig, ProviderFailure)
 from .generation_service import generate_unverified
+from .nararouter_provider import NaraRouterEnvironment, NaraRouterProvider
 from .models import AppRole, Principal
 from .rrm_rules import snapshot_hash
 from .security import require_roles
@@ -53,8 +54,11 @@ def get_provider_bundle(request: Request) -> tuple[GenerationProvider, ProviderC
         if selection == "groq":
             config = GroqEnvironment().adapter_config()
             return GroqProvider(request.app.state.supabase_http, config), config
+        if selection == "nararouter":
+            config = NaraRouterEnvironment().adapter_config()
+            return NaraRouterProvider(request.app.state.supabase_http, config), config
         raise ProviderFailure("PROVIDER_CONFIGURATION_FAILED")
-    except ProviderFailure:
+    except (ProviderFailure, ValueError):
         raise HTTPException(503, "GENERATION_PROVIDER_NOT_CONFIGURED") from None
 
 
@@ -95,6 +99,9 @@ async def create_generation(
     principal: Principal = Depends(AUTHOR),
     store: GenerationStore = Depends(get_generation_store),
 ) -> dict:
+    response_state = getattr(request, "state", None)
+    if response_state is not None:
+        response_state.generation_retry_safe = True
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", idempotency_key):
         raise HTTPException(422, "INVALID_IDEMPOTENCY_KEY")
     first = await preflight(principal, data.employee_id, store, datetime.now(timezone.utc))
@@ -102,18 +109,28 @@ async def create_generation(
         raise HTTPException(409, first.blocker_codes[0] if first.blocker_codes else "PREFLIGHT_BLOCKED")
     prompt = build_prompt(first.snapshot)
     provider, config = get_provider_bundle(request)
-    reserved = await store.reserve(principal.token, {
-        "p_employee": str(data.employee_id), "p_input": first.snapshot.model_dump(mode="json"),
-        "p_input_hash": first.input_hash,
-        "p_idempotency_key_hash": sha256(idempotency_key.encode("utf-8")).hexdigest(),
-        "p_provider": config.provider, "p_model": config.model,
-        "p_provider_config": {"temperature": config.temperature,
-                              "max_output_tokens": config.max_output_tokens,
-                              "timeout_seconds": config.timeout_seconds,
-                              "projection_hash": prompt.projection_hash},
-        "p_prompt_version": PROMPT_VERSION, "p_template_hash": template_hash(),
-        "p_schema_version": SCHEMA_VERSION,
-    })
+    if response_state is not None:
+        response_state.generation_retry_safe = False
+    try:
+        reserved = await store.reserve(principal.token, {
+            "p_employee": str(data.employee_id), "p_input": first.snapshot.model_dump(mode="json"),
+            "p_input_hash": first.input_hash,
+            "p_idempotency_key_hash": sha256(idempotency_key.encode("utf-8")).hexdigest(),
+            "p_provider": config.provider, "p_model": config.model,
+            "p_provider_config": {"temperature": config.temperature,
+                                  "max_output_tokens": config.max_output_tokens,
+                                  "timeout_seconds": config.timeout_seconds,
+                                  "projection_hash": prompt.projection_hash},
+            "p_prompt_version": PROMPT_VERSION, "p_template_hash": template_hash(),
+            "p_schema_version": SCHEMA_VERSION,
+        })
+    except HTTPException as exc:
+        # These reservation rejections roll back atomically, before claim/provider.
+        # Unknown failures/conflicts remain uncertain and must retain the browser lock.
+        if (response_state is not None and exc.status_code == 422
+                and exc.detail in {"GEN4_INVALID_INPUT", "GENERATION_INVALID_INPUT"}):
+            response_state.generation_retry_safe = True
+        raise
     run_id = UUID(reserved["id"])
     if reserved["status"] != "QUEUED" or not await store.claim(principal.token, run_id):
         return {"id": str(run_id), "status": reserved["status"], "idempotent_replay": True}

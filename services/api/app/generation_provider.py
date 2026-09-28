@@ -64,11 +64,21 @@ class GroqEnvironment(BaseSettings):
             raise ProviderFailure("PROVIDER_CONFIGURATION_FAILED") from None
 
 
+class ProviderUsage(BaseModel):
+    """Optional, allowlisted provider telemetry; never validation evidence."""
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    prompt_tokens: int | None = Field(default=None, ge=0, le=1_000_000_000)
+    completion_tokens: int | None = Field(default=None, ge=0, le=1_000_000_000)
+    total_tokens: int | None = Field(default=None, ge=0, le=1_000_000_000)
+
+
 class ProviderResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     text: str
     finish_reason: str
     model: str | None = None
+    usage: ProviderUsage | None = None
+    latency_ms: int | None = Field(default=None, ge=0)
 
 
 class ProviderFailure(Exception):
@@ -113,10 +123,14 @@ class GeminiProvider:
         }
         if format_retry:
             payload["systemInstruction"]["parts"][0]["text"] += "\n" + FORMAT_RETRY_RULE
+        encoded = httpx.Request("POST", "https://invalid.local", json=payload).content
+        if not prompt.within_budget or len(encoded) > MAX_PROVIDER_REQUEST_BYTES:
+            raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
         try:
             response = await self.client.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.model}:generateContent",
-                headers={"x-goog-api-key": key}, json=payload, timeout=self.config.timeout_seconds)
+                headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+                content=encoded, timeout=self.config.timeout_seconds)
         except httpx.TimeoutException:
             raise ProviderFailure("PROVIDER_TIMEOUT", retryable=True) from None
         except httpx.TransportError:
@@ -187,7 +201,7 @@ class GroqProvider:
         # retry instructions), not just concatenated prompt text. This does no I/O.
         encoded = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions",
                                 json=payload).content
-        if len(encoded) > MAX_PROVIDER_REQUEST_BYTES:
+        if not prompt.within_budget or len(encoded) > MAX_PROVIDER_REQUEST_BYTES:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
         try:
             response = await self.client.post(
@@ -198,6 +212,10 @@ class GroqProvider:
             raise ProviderFailure("PROVIDER_TIMEOUT", retryable=True) from None
         except httpx.TransportError:
             raise ProviderFailure("PROVIDER_UNAVAILABLE", retryable=True) from None
+        if response.status_code == 408:
+            raise ProviderFailure("PROVIDER_TIMEOUT", retryable=True)
+        if response.status_code == 413:
+            raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
         if response.status_code == 429:
             delay = _bounded_retry_after(response.headers.get("Retry-After"))
             raise ProviderFailure("PROVIDER_RATE_LIMIT", retryable=delay is not None,
