@@ -76,6 +76,17 @@ export function timingLabel(timing: Record<string, unknown>) {
 }
 
 /** Store before sending; release only an explicitly proven pre-generation rejection. */
+/** A browser generation lock may be released only when no run for the employee is still in progress. */
+export const IN_PROGRESS_RUN_STATUSES = ["QUEUED", "RUNNING"];
+export function canReleaseGenerationLock(runs: Array<Pick<Run, "status">> | null | undefined) {
+  return Array.isArray(runs) && !runs.some((run) => IN_PROGRESS_RUN_STATUSES.includes(run.status));
+}
+/** Explicit, user-confirmed release of the local lock; returns whether a lock was removed. */
+export function releaseGenerationLock(storage: Pick<Storage, "getItem" | "removeItem">, key: string) {
+  if (!storage.getItem(key)) return false;
+  storage.removeItem(key);
+  return true;
+}
 export async function generateOnce<T>(storage: Pick<Storage, "getItem" | "setItem"> & Partial<Pick<Storage, "removeItem">>, key: string, employeeId: string,
   send: (path: string, body: unknown, headers: Record<string, string>) => Promise<T>) {
   if (storage.getItem(key)) throw new ProductError(409, "GENERATION_ALREADY_ATTEMPTED");

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CalendarClock, ClipboardCheck, Cpu, RefreshCw, ShieldCheck, Sparkles, UserRound } from "lucide-react";
 import type { Me } from "@/lib/api";
-import { canAuthor, canReadGeneration, generateOnce, generationMessage, humanize, postProduct, productRequest, type Employee, type Page, type PlanModule, type Run, type Validation, ProductError } from "@/lib/product";
+import { canAuthor, canReadGeneration, canReleaseGenerationLock, generateOnce, releaseGenerationLock, generationMessage, humanize, postProduct, productRequest, type Employee, type Page, type PlanModule, type Run, type Validation, ProductError } from "@/lib/product";
 import type { Preflight } from "@/lib/phase4d-test";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
@@ -27,8 +27,11 @@ function Step({ n, title, done, children }: { n: number; title: string; done?: b
   return <li className="relative flex gap-4 pb-6 last:pb-0"><span className={`relative z-10 flex size-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${done ? "bg-primary-solid text-primary-foreground" : "bg-primary-soft text-primary"}`}>{n}</span><div className="min-w-0 flex-1 space-y-3 pt-1"><h3 className="text-sm font-semibold">{title}</h3>{children}</div></li>;
 }
 
-function GenerationForm({ me, employeeId, refresh }: { me: Me; employeeId: string; refresh: () => void }) {
+function GenerationForm({ me, employeeId, refresh, runs }: { me: Me; employeeId: string; refresh: () => void; runs: Run[] }) {
   const [preflight, setPreflight] = useState<Preflight | null>(null);
+  const [confirmRelease, setConfirmRelease] = useState(false);
+  const [released, setReleased] = useState(false);
+  const releasable = canAuthor(me) && canReleaseGenerationLock(runs);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [confirm, setConfirm] = useState(false);
@@ -54,6 +57,11 @@ function GenerationForm({ me, employeeId, refresh }: { me: Me; employeeId: strin
       refresh(); if (result.id) router.push(`/app/plans/${result.id}`);
     } catch (e) { setError(e); try { setAttempted(Boolean(localStorage.getItem(key))); } catch { setAttempted(true); } } finally { lock.current = false; setBusy(false); }
   }
+  function release() {
+    if (!releasable || busy || lock.current) return;
+    try { releaseGenerationLock(localStorage, key); } catch { return; }
+    setConfirmRelease(false); setPreflight(null); setError(null); setAttempted(false); setReleased(true);
+  }
   return <>
     <Step n={2} title="Check readiness" done={ready}>
       <p className="text-sm text-muted-foreground">Confirms approved ground truth and employee context. No AI provider is called.</p>
@@ -68,7 +76,10 @@ function GenerationForm({ me, employeeId, refresh }: { me: Me; employeeId: strin
       {!!error && <Problem error={error} />}
       <Button disabled={!ready || busy || attempted} onClick={() => setConfirm(true)}><Sparkles size={16} aria-hidden="true" />{busy ? "Submitting…" : attempted ? "Generation locked" : "Generate once"}</Button>
       {attempted && <p className="text-xs text-muted-foreground">Generation is locked in this browser for this employee. Inspect the run history before any further attempt; a previous or uncertain request is never automatically repeated. Readiness does not release this lock.</p>}
+      {attempted && canAuthor(me) && <div className="space-y-1.5"><Button variant="outline" size="sm" disabled={!releasable || busy} onClick={() => setConfirmRelease(true)}>Release lock</Button><p className="text-xs text-muted-foreground">{releasable ? "Available because this employee's run history shows no generation in progress." : "Unavailable while a generation for this employee is queued or running. Refresh the history once it completes."}</p></div>}
+      {released && !attempted && <p role="status" className="text-xs text-muted-foreground">Lock released in this browser. Check readiness again before generating. This release is not recorded in the server audit trail.</p>}
     </Step>
+    <Modal open={confirmRelease} onOpenChange={setConfirmRelease} title="Release the generation lock?" description="This lets this browser send one new generation request for this employee. Earlier attempts stay in the run history. Release only after confirming no request is still in progress."><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setConfirmRelease(false)}>Cancel</Button><Button disabled={!releasable || busy} onClick={release}>Release lock</Button></div></Modal>
     <Modal open={confirm} onOpenChange={setConfirm} title="Generate onboarding plan?" description="This sends one generation request using approved evidence. A generated plan still requires independent Python validation and human review."><Button disabled={busy || attempted || !ready} onClick={() => void generate()}>Confirm generation</Button></Modal>
   </>;
 }
@@ -115,7 +126,7 @@ export function Plans({ me, runId, employeeFilter }: { me: Me; runId?: string; e
                 <p className="text-xs text-muted-foreground">History is filtered by employee on the server. Up to 100 employee choices are loaded.</p>
                 {selectedEmployee && <div className="space-y-3 rounded-md bg-surface-raised p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="flex items-center gap-2 text-sm font-medium"><UserRound size={16} className="text-primary" aria-hidden="true" />{selectedEmployee.profiles?.display_name ?? selectedEmployee.employee_code}</p><StateBadge value={selectedEmployee.training_status} /></div><Fields values={{ "Employee": selectedEmployee.employee_code, "Experience": humanize(selectedEmployee.experience_level), "Joining date": selectedEmployee.joining_date, "Role & department": <Link className="text-primary underline" href={`/app/employees/${selectedEmployee.id}`}>View authoritative employee context</Link> }} /></div>}
               </Step>
-              {employee && canAuthor(me) ? <GenerationForm key={employee} me={me} employeeId={employee} refresh={state.refresh} /> : <Step n={2} title="Check readiness and generate"><p className="text-sm text-muted-foreground">{employee ? "Only Admins and Training Managers can generate plans." : "Select an employee to continue."}</p></Step>}
+              {employee && canAuthor(me) ? <GenerationForm key={employee} me={me} employeeId={employee} refresh={state.refresh} runs={data.page.items.filter((r) => r.employee_id === employee)} /> : <Step n={2} title="Check readiness and generate"><p className="text-sm text-muted-foreground">{employee ? "Only Admins and Training Managers can generate plans." : "Select an employee to continue."}</p></Step>}
             </ol>
           </section>
           <section className="min-w-0 space-y-3" aria-labelledby="history-heading">

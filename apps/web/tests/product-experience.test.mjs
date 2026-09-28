@@ -184,3 +184,29 @@ test("human override stays separate from contradictory JEV decision in rendered 
   assert.doesNotMatch(html, />Admin override</);
   assert.match(html, /disabled=""[^>]*>Approve/);
 });
+test("generation lock release: helpers only allow it with no run in progress and remove only that key", () => {
+  assert.equal(product.canReleaseGenerationLock([{ status: "FAILED" }, { status: "UNVERIFIED" }]), true);
+  assert.equal(product.canReleaseGenerationLock([]), true);
+  assert.equal(product.canReleaseGenerationLock([{ status: "FAILED" }, { status: "RUNNING" }]), false);
+  assert.equal(product.canReleaseGenerationLock([{ status: "QUEUED" }]), false);
+  assert.equal(product.canReleaseGenerationLock(null), false);
+  const values = new Map([["lock-a", "key"], ["lock-b", "other"]]);
+  const storage = { getItem: (k) => values.get(k), removeItem: (k) => values.delete(k) };
+  assert.equal(product.releaseGenerationLock(storage, "lock-a"), true);
+  assert.equal(values.has("lock-a"), false); assert.equal(values.get("lock-b"), "other");
+  assert.equal(product.releaseGenerationLock(storage, "lock-a"), false);
+});
+test("Release lock is shown to authors, disabled while a run is in progress, hidden from Manager", () => {
+  const { Plans } = load(path.join(root, "components/product/plans.tsx"));
+  const employee = { id: "emp-1", employee_code: "EMP-1", training_status: "NOT_STARTED", experience_level: "BEGINNER", joining_date: "2026-10-01", profiles: { display_name: "Test employee" } };
+  const run = (status) => ({ id: `run-${status}`, employee_id: "emp-1", status, created_at: "2026-09-28T00:00:00Z", provider: "nararouter" });
+  const render = (role, statuses) => withResource({ run: null, person: null, validation: null, employees: [employee], page: { items: statuses.map(run), offset: 0, limit: 30, has_more: false } },
+    () => renderToStaticMarkup(React.createElement(Plans, { me: me(role), employeeFilter: "emp-1" })));
+  const failedOnly = render("TRAINING_MANAGER", ["FAILED", "FAILED"]);
+  assert.match(failedOnly, /<button(?![^>]*disabled="")[^>]*>Release lock/);
+  assert.match(failedOnly, /shows no generation in progress/);
+  const running = render("ADMIN", ["FAILED", "RUNNING"]);
+  assert.match(running, /disabled=""[^>]*>Release lock/);
+  assert.match(running, /queued or running/);
+  assert.doesNotMatch(render("MANAGER", ["FAILED"]), /Release lock/);
+});
