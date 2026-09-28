@@ -71,3 +71,15 @@ def test_repository_rpc_argument_names_match_sql():
             and node.args and isinstance(node.args[0],ast.Constant) and node.args[0].value==name)
         actual={key.value for key in call.args[1].keys}
         assert actual==expected
+
+
+def test_warning_migration_changes_only_the_blocking_predicate():
+    new = (Path(__file__).parents[3] / "supabase/migrations/202609280002_validation_warning_findings.sql").read_text()
+    def body(text, keyword):
+        start = text.index(keyword + " public.record_python_validation(")
+        return text[start + len(keyword):text.index("end $$;", start)]
+    old_body, new_body = body(SQL, "create function"), body(new, "create or replace function")
+    removed = "\n                    or x->>'code' is distinct from 'DUPLICATE_REQUIREMENT'"
+    assert removed in old_body and removed not in new_body
+    assert old_body.replace(removed, "") == new_body
+    assert new.strip().startswith("--") and "begin;" in new and new.rstrip().endswith("commit;")
