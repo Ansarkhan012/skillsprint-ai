@@ -151,7 +151,8 @@ def test_size_guard_never_calls_http(retry, kind):
 
 
 @pytest.mark.parametrize('status,code,retryable', [
-    (401, 'PROVIDER_AUTH_FAILED', False), (403, 'PROVIDER_ACCESS_DENIED', False),
+    (401, 'PROVIDER_AUTH_FAILED', False), (402, 'PROVIDER_PAYMENT_REQUIRED', False),
+    (403, 'PROVIDER_ACCESS_DENIED', False),
     (400, 'PROVIDER_REQUEST_FAILED', False), (404, 'PROVIDER_REQUEST_FAILED', False),
     (405, 'PROVIDER_REQUEST_FAILED', False),
     (408, 'PROVIDER_TIMEOUT', True),

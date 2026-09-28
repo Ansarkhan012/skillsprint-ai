@@ -17,7 +17,7 @@ _LOG = logging.getLogger(__name__)
 _SAFE_UPSTREAM_CODES = frozenset({
     "bad_request", "forbidden", "invalid_api_key", "invalid_request", "invalid_request_error",
     "insufficient_balance", "insufficient_quota", "model_not_found", "model_not_supported",
-    "not_found", "rate_limit_exceeded", "unsupported_parameter", "unsupported_response_format",
+    "not_found", "payment_required", "rate_limit_exceeded", "unsupported_parameter", "unsupported_response_format",
     "validation_error", "context_length_exceeded",
 })
 _SAFE_ERROR_HINTS = (
@@ -159,6 +159,8 @@ class NaraRouterProvider:
                          self.config.model, response.status_code, safe_code, safe_hint)
         if response.status_code == 401:
             raise ProviderFailure("PROVIDER_AUTH_FAILED")
+        if response.status_code == 402:
+            raise ProviderFailure("PROVIDER_PAYMENT_REQUIRED")
         if response.status_code == 403:
             raise ProviderFailure("PROVIDER_ACCESS_DENIED")
         if response.status_code == 408:

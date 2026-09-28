@@ -106,6 +106,7 @@ def test_groq_request_and_strict_service_output(monkeypatch):
 @pytest.mark.parametrize("status,code,retryable", [
     (429, "PROVIDER_RATE_LIMIT", False), (503, "PROVIDER_UNAVAILABLE", True),
     (401, "PROVIDER_AUTH_FAILED", False), (403, "PROVIDER_AUTH_FAILED", False),
+    (402, "PROVIDER_PAYMENT_REQUIRED", False),
     (400, "PROVIDER_REQUEST_FAILED", False), (404, "PROVIDER_REQUEST_FAILED", False),
     (408, "PROVIDER_TIMEOUT", True), (413, "GENERATION_PROJECTION_TOO_LARGE", False),
 ])

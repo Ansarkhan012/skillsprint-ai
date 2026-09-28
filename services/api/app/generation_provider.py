@@ -141,6 +141,8 @@ class GeminiProvider:
                                   retry_after_seconds=delay)
         if response.status_code in (401, 403):
             raise ProviderFailure("PROVIDER_AUTH_FAILED")
+        if response.status_code == 402:
+            raise ProviderFailure("PROVIDER_PAYMENT_REQUIRED")
         if response.status_code >= 500:
             raise ProviderFailure("PROVIDER_UNAVAILABLE", retryable=True)
         if not response.is_success:
@@ -222,6 +224,8 @@ class GroqProvider:
                                   retry_after_seconds=delay)
         if response.status_code in (401, 403):
             raise ProviderFailure("PROVIDER_AUTH_FAILED")
+        if response.status_code == 402:
+            raise ProviderFailure("PROVIDER_PAYMENT_REQUIRED")
         if response.status_code >= 500:
             raise ProviderFailure("PROVIDER_UNAVAILABLE", retryable=True)
         if not response.is_success:

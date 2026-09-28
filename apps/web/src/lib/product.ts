@@ -39,6 +39,7 @@ export function generationMessage(code: string | null) {
     PROVIDER_RATE_LIMIT: "The provider rate limit was reached. No onboarding plan was created.",
     SCHEMA_INVALID: "The generated response did not meet the required plan structure. It was not accepted as a plan.",
     PROVIDER_REQUEST_FAILED: "The provider could not accept the generation request. No onboarding plan was created.",
+    PROVIDER_PAYMENT_REQUIRED: "The GenAI provider account has insufficient credits (HTTP 402). Top up the account or switch AI_PROVIDER. No onboarding plan was created.",
   };
   return messages[code ?? ""] ?? "Generation did not produce an accepted plan. The attempt is retained in the history below.";
 }

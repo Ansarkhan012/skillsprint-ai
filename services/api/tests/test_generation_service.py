@@ -412,7 +412,7 @@ def test_backend_only_gemini_adapter_safe_response_and_errors():
 
 
 @pytest.mark.parametrize("status,code", [(429, "PROVIDER_RATE_LIMIT"), (503, "PROVIDER_UNAVAILABLE"),
-                                        (401, "PROVIDER_AUTH_FAILED")])
+                                        (401, "PROVIDER_AUTH_FAILED"), (402, "PROVIDER_PAYMENT_REQUIRED")])
 def test_gemini_http_statuses_do_not_expose_raw_error(status, code):
     secret = "private-test-only-key"
 
