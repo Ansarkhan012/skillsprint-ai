@@ -503,3 +503,18 @@ def test_format_retry_names_the_failed_fields_without_model_text():
     feedback = retry.rules[len(first.rules):]
     assert "SCHEMA_INVALID" in feedback and "plan.stages.0.modules.0.purpose missing" in feedback
     assert "IGNORE" not in feedback and retry.untrusted_data == first.untrusted_data
+
+
+@pytest.mark.parametrize("call_deadline,expected_calls", [(100, 2), (241, 1)])
+def test_run_budget_skips_a_retry_that_could_not_finish_in_time(call_deadline, expected_calls):
+    from types import SimpleNamespace
+    provider = FakeProvider(["not json", json.dumps(complete_output())])
+    provider.config = SimpleNamespace(timeout_seconds=call_deadline)
+    result, _ = execute(provider)
+    assert result.provider_calls == expected_calls
+    assert result.status == ("UNVERIFIED" if expected_calls == 2 else "FAILED")
+    unavailable = FakeProvider([ProviderFailure("PROVIDER_UNAVAILABLE", retryable=True)] * 3)
+    unavailable.config = SimpleNamespace(timeout_seconds=call_deadline)
+    result, delays = execute(unavailable)
+    assert result.error_code == "PROVIDER_UNAVAILABLE"
+    assert result.provider_calls == (3 if call_deadline == 100 else 1)

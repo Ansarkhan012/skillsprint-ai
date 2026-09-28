@@ -21,7 +21,8 @@ class ProviderConfig(BaseModel):
     provider: str = "gemini"
     model: str = Field(pattern=r"^[A-Za-z0-9_./-]{1,100}$")
     api_key: SecretStr = Field(repr=False)
-    timeout_seconds: float = Field(default=20, ge=1, le=60)
+    # Total per-call deadline; the DB reservation accepts 1-180 s (migration 202609280004).
+    timeout_seconds: float = Field(default=20, ge=1, le=180)
     max_output_tokens: int = Field(default=8192, ge=256, le=65536)
     temperature: float = Field(default=0.1, ge=0, le=1)
 

@@ -74,7 +74,7 @@ def test_missing_configuration_fails_without_fallback(monkeypatch, name):
 @pytest.mark.parametrize('name,value', [
     ('API_KEY', ' '), ('API_KEY', 'key\r\nInjected: value'),
     ('MODEL', 'bad alias'), ('MODEL', 'x'*101), ('MODEL', 'alias\n'),
-    ('TIMEOUT_SECONDS', 'not-a-number'), ('TIMEOUT_SECONDS', '61'),
+    ('TIMEOUT_SECONDS', 'not-a-number'), ('TIMEOUT_SECONDS', '181'),
     ('MAX_OUTPUT_TOKENS', '0'), ('TEMPERATURE', '2'),
     ('BASE_URL', 'http://router.bynara.id/v1'), ('BASE_URL', 'https://user:password@router.bynara.id/v1'),
     ('BASE_URL', 'https://router.bynara.id/v1?key=hidden'), ('BASE_URL', 'https://router.bynara.id/v1#fragment'),
@@ -417,3 +417,17 @@ def test_total_deadline_fails_cleanly_once_without_retry():
     result = asyncio.run(run())
     assert result.status == 'FAILED' and result.error_code == 'PROVIDER_DEADLINE_EXCEEDED'
     assert result.provider_calls == len(calls) == 1
+
+
+def test_timeout_migration_changes_only_the_deadline_bound():
+    root = Path(__file__).resolve().parents[3]/'supabase'/'migrations'
+    previous = (root/'202609280003_nararouter_free_models.sql').read_text()
+    new = (root/'202609280004_generation_timeout_180.sql').read_text()
+    marker = 'create or replace function'
+    body = lambda text: text[text.index(marker):text.index('end $$;', text.index(marker))]
+    assert body(new).replace('not between 1 and 180', 'not between 1 and 60') == body(previous)
+    assert 'not between 1 and 180' in new and 'alter table' not in new
+    assert new.lstrip().startswith('--') and '\nbegin;' in new and new.rstrip().endswith('commit;')
+    assert config(timeout_seconds=180).timeout_seconds == 180
+    with pytest.raises(ValueError):
+        config(timeout_seconds=181)

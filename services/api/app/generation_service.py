@@ -180,6 +180,9 @@ STRUCTURAL_PROVIDER_ERRORS = {"PROVIDER_TRUNCATED", "PROVIDER_INVALID_RESPONSE"}
 # Transient 5xx/timeout/429: at most 3 attempts, exponential backoff (2s, 4s), honouring
 # a longer Retry-After up to the cap. Every attempt is persisted via on_attempt.
 MAX_TRANSPORT_RETRIES = 2
+# Whole-run budget: a retry is skipped when elapsed time plus one full provider
+# deadline would exceed it, so a slow model cannot chain two long calls.
+RUN_BUDGET_SECONDS = 240.0
 RETRY_BASE_SECONDS = 2.0
 RETRY_MAX_SECONDS = 8.0
 
@@ -203,6 +206,15 @@ async def generate_unverified(
     calls = 0
     transport_retries = 0
     attempt_prompt = prompt
+    run_started = perf_counter()
+    call_deadline = getattr(getattr(provider, "config", None), "timeout_seconds", 0) or 0
+
+    def budget_allows(extra_delay: float = 0.0) -> bool:
+        allowed = perf_counter() - run_started + extra_delay + call_deadline <= RUN_BUDGET_SECONDS
+        if not allowed:
+            _LOG.warning("generation_run_budget_exhausted request_id=%s elapsed_s=%.1f call_deadline_s=%.0f",
+                         request_id, perf_counter() - run_started, call_deadline)
+        return allowed
     for format_attempt in range(2):
         first_in_format = True
         while True:
@@ -229,11 +241,13 @@ async def generate_unverified(
                     transport_retries += 1
                     delay = min(max(exc.retry_after_seconds or 0.0,
                                     RETRY_BASE_SECONDS * 2 ** (transport_retries - 1)), RETRY_MAX_SECONDS)
+                    if not budget_allows(delay):
+                        return GenerationResult(status="FAILED", error_code=code, provider_calls=calls)
                     _LOG.warning("generation_provider_retry request_id=%s code=%s retry=%d/%d delay_s=%.1f",
                                  request_id, code, transport_retries, MAX_TRANSPORT_RETRIES, delay)
                     await sleep(delay)
                     continue
-                if code in STRUCTURAL_PROVIDER_ERRORS and format_attempt == 0:
+                if code in STRUCTURAL_PROVIDER_ERRORS and format_attempt == 0 and budget_allows():
                     break
                 return GenerationResult(status="FAILED", error_code=code, provider_calls=calls)
             except StructuralFailure as exc:
@@ -251,7 +265,7 @@ async def generate_unverified(
                         response_size=len(response_bytes) if response_bytes is not None else None, parse_outcome="SCHEMA_INVALID",
                         error_code=exc.code))
                 if format_attempt == 0 and exc.code in {"EMPTY_RESPONSE", "MALFORMED_JSON", "SCHEMA_INVALID",
-                                                       "TRUNCATED_RESPONSE", "RESPONSE_TOO_LARGE"}:
+                                                       "TRUNCATED_RESPONSE", "RESPONSE_TOO_LARGE"} and budget_allows():
                     attempt_prompt = prompt.model_copy(update={"rules": prompt.rules + "\n" + retry_feedback(exc)})
                     break
                 return GenerationResult(status="FAILED", error_code=exc.code, provider_calls=calls)
