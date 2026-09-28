@@ -44,7 +44,7 @@ npm install
 
    | `AI_PROVIDER` | Required variables | Notes |
    |---|---|---|
-   | `nararouter` (default) | `NARAROUTER_API_KEY`, `NARAROUTER_BASE_URL`, `NARAROUTER_MODEL=agnes-2.5-flash` | Free-plan model. Requires migrations up to `202609280005`. Use `NARAROUTER_MAX_OUTPUT_TOKENS=16384`, `NARAROUTER_TIMEOUT_SECONDS=290`. See the model notes below |
+   | `nararouter` (default) | `NARAROUTER_API_KEY`, `NARAROUTER_BASE_URL`, `NARAROUTER_MODEL=agnes-2.5-flash` | Free-plan model. Requires migrations up to `202609280005`. Use `NARAROUTER_MAX_OUTPUT_TOKENS=32768` (a full plan can exceed 16,384 tokens), `NARAROUTER_TIMEOUT_SECONDS=290`. See the model notes below |
    | `gemini` | `GEMINI_API_KEY`, `GEMINI_MODEL` | The Gemini free tier allows only about 20 requests/day per model |
    | `groq` | `GROQ_API_KEY` (`GROQ_MODEL=openai/gpt-oss-20b`) | Free-tier tokens-per-minute limits can reject full plans (HTTP 413) |
 
