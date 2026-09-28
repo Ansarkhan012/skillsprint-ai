@@ -44,9 +44,20 @@ npm install
 
    | `AI_PROVIDER` | Required variables | Notes |
    |---|---|---|
-   | `nararouter` | `NARAROUTER_API_KEY`, `NARAROUTER_BASE_URL`, `NARAROUTER_MODEL=gemini-3.8-flash-high` | Requires migrations `202609270002` and `202609280001`. Use `NARAROUTER_MAX_OUTPUT_TOKENS=16384`, `NARAROUTER_TIMEOUT_SECONDS=60` |
+   | `nararouter` (default) | `NARAROUTER_API_KEY`, `NARAROUTER_BASE_URL`, `NARAROUTER_MODEL=agnes-2.5-flash` | Free-plan model. Requires migrations up to `202609280003`. Use `NARAROUTER_MAX_OUTPUT_TOKENS=16384`, `NARAROUTER_TIMEOUT_SECONDS=60`. See the model notes below |
    | `gemini` | `GEMINI_API_KEY`, `GEMINI_MODEL` | The Gemini free tier allows only about 20 requests/day per model |
    | `groq` | `GROQ_API_KEY` (`GROQ_MODEL=openai/gpt-oss-20b`) | Free-tier tokens-per-minute limits can reject full plans (HTTP 413) |
+
+   **NaraRouter model notes** (measured 2026-09-28 with the repository's 6-requirement fixture; one full generation each):
+
+   | Model | Result |
+   |---|---|
+   | `agnes-2.5-flash` (**default**) | Schema-valid on the first call in about 136 s: 5 modules, each with objectives, a checklist item, a task and a quiz; traceability 25/25 |
+   | `nemotron-3-ultra-free` (**fallback**) | Free plan, 1M context. Allowed by `202609280003` but not yet tested live |
+   | `agnes-3-flash` | Accepted the request, but both attempts were truncated at 16,384 output tokens after 3–5 minutes. Not recommended |
+   | `gemini-3.8-flash-high` | Pay-as-you-go: HTTP 402 (`PROVIDER_PAYMENT_REQUIRED`) without credits |
+
+   A generation takes about 2 minutes on the free models, which is above the SRS 30-second target. The reasoning models spend much of their time before emitting the plan.
 
 4. Create `apps/web/.env.local` containing `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `API_BASE_URL=http://127.0.0.1:8000`, and the same `MAX_UPLOAD_BYTES`.
 
@@ -57,6 +68,7 @@ Never put a provider key, `SUPABASE_SERVICE_ROLE_KEY`, or `DATABASE_URL` in a `N
 Apply the migrations in `supabase/migrations` **once each, in filename order**, using the Supabase SQL editor or your migration workflow. The later ones are manual, reviewed steps:
 
 - `202609270002_nararouter_generation_provider.sql` and `202609280001_nararouter_model_constraint.sql`: run `docs/NARAROUTER_LIVE_CONTRACT_CHECK.sql` first.
+- `202609280003_nararouter_free_models.sql`: allows the free-plan NaraRouter models `agnes-2.5-flash`, `agnes-3-flash` and `nemotron-3-ultra-free`.
 - `202609280002_validation_warning_findings.sql`: lets *Verified with Warning* results (for example staged timing warnings) be saved.
 
 Bootstrap:

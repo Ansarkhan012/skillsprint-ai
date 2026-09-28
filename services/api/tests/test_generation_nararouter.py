@@ -367,3 +367,23 @@ def test_table_model_check_accepts_only_discovered_nararouter_alias():
     assert correction.count('alter table public.generation_runs') == 2
     assert not any(line.lstrip().lower().startswith(('update ', 'delete ', 'insert ', 'truncate '))
                    for line in correction.splitlines())
+
+
+def test_free_model_migration_changes_only_the_nararouter_model_allowlist():
+    root = Path(__file__).resolve().parents[3]/'supabase'/'migrations'
+    previous = (root/'202609270002_nararouter_generation_provider.sql').read_text()
+    new = (root/'202609280003_nararouter_free_models.sql').read_text()
+    marker = 'create or replace function'
+    allow = ("('gemini-3.8-flash-high','agnes-3-flash','agnes-2.5-flash','nemotron-3-ultra-free')")
+    old_function = previous[previous.index(marker):previous.index('end $$;', previous.index(marker))]
+    new_function = new[new.index(marker):new.index('end $$;', new.index(marker))]
+    assert new_function.replace(
+        "     or (p_provider = 'nararouter' and p_model not in\n         " + allow + ")",
+        "     or (p_provider = 'nararouter' and p_model is distinct from 'gemini-3.8-flash-high')") == old_function
+    assert new.count(allow) == 2  # reservation function and table check agree
+    assert "provider = 'groq' and model = 'openai/gpt-oss-20b'" in new
+    assert PROMPT_VERSION in new and template_hash() in new
+    assert new.lstrip().startswith('--') and '\nbegin;' in new and new.rstrip().endswith('commit;')
+    top_level = new[:new.index(marker)] + new[new.index('end $$;', new.index(marker)):]
+    assert not any(line.lstrip().lower().startswith(('update ', 'delete ', 'insert ', 'truncate '))
+                   for line in top_level.splitlines())  # the function body itself inserts runs
