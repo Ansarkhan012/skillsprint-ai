@@ -4,12 +4,12 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const styles = cva(
-  "inline-flex items-center justify-center gap-2 rounded-md text-sm font-semibold transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+  "inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
   { variants: {
     variant: {
-      primary: "bg-primary text-primary-foreground hover:bg-foreground",
-      secondary: "bg-secondary text-foreground hover:bg-secondary/75",
-      outline: "border border-border-strong bg-card text-foreground hover:border-primary hover:bg-muted",
+      primary: "bg-primary-solid text-primary-foreground shadow-panel hover:bg-primary-hover",
+      secondary: "bg-primary-soft text-primary hover:bg-primary-soft/70",
+      outline: "border border-border bg-card text-foreground shadow-panel hover:bg-muted",
       ghost: "text-foreground hover:bg-muted",
     },
     size: { default: "h-10 px-4", sm: "h-9 px-3", icon: "size-10" },

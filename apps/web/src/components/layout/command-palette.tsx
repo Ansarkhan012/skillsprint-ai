@@ -23,10 +23,10 @@ export function CommandPalette({ me }: { me: Me }) {
     return () => window.removeEventListener("keydown", handle);
   }, []);
   return <Dialog.Root open={open} onOpenChange={value => { setOpen(value); if (!value) setQuery(""); }}>
-    <Dialog.Trigger className="flex h-9 items-center gap-2 rounded-md border border-border bg-surface-raised px-3 text-xs text-muted-foreground hover:border-border-strong" aria-label="Search navigation (Control or Command K)">
-      <Search size={15} aria-hidden="true" /><span className="hidden md:inline">Jump to a page</span><kbd className="hidden rounded border border-border bg-card px-1.5 py-0.5 text-[10px] md:inline">Ctrl K</kbd>
+    <Dialog.Trigger className="flex h-11 w-11 items-center justify-center gap-3 rounded-md border border-border bg-surface-raised text-sm text-muted-foreground hover:border-border-strong md:w-full md:max-w-md md:justify-start md:px-4" aria-label="Search pages (Control or Command K)">
+      <Search size={18} className="shrink-0" aria-hidden="true" /><span className="hidden flex-1 text-left md:inline">Search pages…</span><kbd className="hidden rounded-md border border-border bg-card px-2 py-0.5 text-xs md:inline">Ctrl K</kbd>
     </Dialog.Trigger>
-    <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-sidebar/45" />
+    <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-overlay" />
       <Dialog.Content className="fixed left-1/2 top-[15vh] z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 overflow-hidden rounded-panel border border-border bg-card shadow-xl">
         <Dialog.Title className="sr-only">Navigate your workspace</Dialog.Title>
         <Dialog.Description className="sr-only">Find pages available to your role. Use the arrow keys to move through results.</Dialog.Description>

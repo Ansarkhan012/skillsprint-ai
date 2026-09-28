@@ -51,6 +51,20 @@ export function traceabilityLabel(summary: Validation["summary"]) {
   const pct = (a: number, b: number) => `${Math.floor((a / b) * 1000) / 10}%`;
   return `${pct(traced, total)} (${traced} of ${total} items)` + (mTotal ? ` · mandatory ${pct(mTraced ?? 0, mTotal)}` : "");
 }
+/** Dashboard metrics over the loaded, authorized records only; null means the data was unavailable. */
+export function dashboardMetrics(validations: Validation[] | null, employees: Employee[] | null) {
+  const percent = (part: number, whole: number) => whole > 0 ? Math.floor((part / whole) * 1000) / 10 : null;
+  const decision = (v: Validation) => v.jev_decisions?.status ?? v.decision?.status ?? "UNKNOWN";
+  const traced = validations?.filter((v) => (v.summary.generated_items_total ?? 0) > 0) ?? [];
+  return {
+    validationCount: validations?.length ?? null,
+    coverage: validations ? percent(validations.reduce((n, v) => n + v.summary.mandatory_covered, 0), validations.reduce((n, v) => n + v.summary.mandatory_total, 0)) : null,
+    traceability: percent(traced.reduce((n, v) => n + (v.summary.generated_items_traceable ?? 0), 0), traced.reduce((n, v) => n + (v.summary.generated_items_total ?? 0), 0)),
+    tracedCount: traced.length,
+    flagged: validations ? validations.filter((v) => !["VERIFIED", "VERIFIED_WITH_WARNING"].includes(decision(v))).length : null,
+    employees: employees?.length ?? null,
+  };
+}
 export function canReviewRun(me: Me, run: Pick<Run, "created_by" | "employee_profile_id">) {
   return me.roles.some((r) => r === "ADMIN" || r === "REVIEWER") && me.id !== run.created_by && me.id !== run.employee_profile_id;
 }

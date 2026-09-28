@@ -1,19 +1,22 @@
 "use client";
 import { useCallback, useState } from "react";
 import Link from "next/link";
-import { FileText, Users, ShieldCheck, LibraryBig } from "lucide-react";
+import { Users, Target, Link2, Flag, RefreshCw } from "lucide-react";
 import type { Me } from "@/lib/api";
-import { canReadGeneration, humanize, productRequest, type Page, type Run, type Employee, type Validation } from "@/lib/product";
+import { canReadGeneration, dashboardMetrics, humanize, productRequest, type Page, type Run, type Employee, type Validation } from "@/lib/product";
 import type { CompanyDocument } from "@/lib/documents";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
+import { StatCard } from "@/components/shared/stat-card";
 import { DataTable, Empty, Loading, Pager, Problem, StateBadge, panel, useResource } from "./common";
 
 import { WorkflowRail, RunSignals } from "./intelligence";
+export type DashboardData = { documents: Page<CompanyDocument> | null; employees: Employee[] | null; runs: Page<Run> | null; validations: Page<Validation> | null; errors: number };
+
 export function Overview({ me, reports = false }: { me: Me; reports?: boolean }) {
   const [offset, setOffset] = useState(0);
   const knowledge = canReadGeneration(me), people = me.roles.some((r) => r !== "EMPLOYEE");
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<DashboardData> => {
     const [documents, employees, runs, validations] = await Promise.allSettled([
       knowledge ? productRequest<Page<CompanyDocument>>(`documents?limit=30&offset=${offset}`) : Promise.resolve(null),
       people ? productRequest<Employee[]>(`employees?limit=30&offset=${offset}`) : Promise.resolve(null),
@@ -23,22 +26,42 @@ export function Overview({ me, reports = false }: { me: Me; reports?: boolean })
     return { documents: documents.status === "fulfilled" ? documents.value : null, employees: employees.status === "fulfilled" ? employees.value : null, runs: runs.status === "fulfilled" ? runs.value : null, validations: validations.status === "fulfilled" ? validations.value : null,
       errors: [documents, employees, runs, validations].filter((r) => r.status === "rejected").length };
   }, [knowledge, people, offset]);
-  const state = useResource(load), data = state.data;
-  return <div className="space-y-7"><PageHeader eyebrow={reports ? "Insights" : "SkillSprint AI"} title={reports ? "Operational reports" : "Grounded Employee Onboarding Intelligence"} description={reports ? "Counts and records from the currently loaded, authorized data pages. These are not organization-wide totals." : `Company documents become approved ground truth. AI drafts a role-aware onboarding plan, independent Python checks its evidence, and people retain final control. Welcome, ${me.display_name}.`} action={<Button variant="outline" onClick={state.refresh}>Refresh data</Button>} />
-    {!reports && <WorkflowRail />}
-    {state.loading ? <Loading /> : state.error ? <Problem error={state.error} retry={state.refresh} /> : data && <>
-      {data.errors > 0 && <div role="alert" className={`${panel} text-sm`}>Some data could not be loaded. Unavailable counts are shown as “Unavailable”, never as zero. <Button variant="outline" size="sm" onClick={state.refresh}>Retry data</Button></div>}
-      <div className="grid overflow-hidden rounded-md border border-border bg-card sm:grid-cols-2 xl:grid-cols-4">{[
-        ...(knowledge ? [{ label: "Documents", count: data.documents?.items.length, icon: FileText, href: "/app/documents" }, { label: "Generation runs", count: data.runs?.items.length, icon: LibraryBig, href: "/app/plans" }, { label: "Validation results", count: data.validations?.items.length, icon: ShieldCheck, href: "/app/reviews" }] : []),
-        ...(people ? [{ label: "Employees", count: data.employees?.length, icon: Users, href: "/app/employees" }] : []),
-      ].map(({ label, count, icon: Icon, href }) => <Link href={href} key={label} className="group relative border-b border-r border-border p-5 transition-colors hover:bg-muted/50 sm:p-6"><div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"><span>{label}</span><Icon size={17} aria-hidden="true" /></div><p className="metric-value mt-5 text-3xl font-semibold">{count ?? "Unavailable"}</p><p className="mt-2 text-xs text-muted-foreground">Authorized page · up to 30 records</p></Link>)}</div>
+  const state = useResource(load);
+  return <DashboardView me={me} reports={reports} data={state.data} loading={state.loading} error={state.error} refresh={state.refresh} offset={offset} setOffset={setOffset} />;
+}
+
+const pct = (value: number | null) => value === null ? "—" : `${value}%`;
+
+export function DashboardView({ me, reports, data, loading, error, refresh, offset, setOffset }: { me: Me; reports: boolean; data: DashboardData | null; loading: boolean; error: unknown; refresh: () => void; offset: number; setOffset: (offset: number) => void }) {
+  const knowledge = canReadGeneration(me), people = me.roles.some((r) => r !== "EMPLOYEE");
+  const metrics = data ? dashboardMetrics(data.validations?.items ?? null, data.employees) : null;
+  return <div className="space-y-6"><PageHeader title={reports ? "Operational reports" : "Dashboard"} description={reports ? "Counts and records from the currently loaded, authorized data pages. These are not organization-wide totals." : `Welcome back, ${me.display_name}. Approved documents become ground truth, AI drafts role-aware plans, and independent Python validation decides what can be trusted.`} action={<Button variant="outline" onClick={refresh}><RefreshCw size={16} aria-hidden="true" />Refresh</Button>} />
+    {loading ? <Loading /> : error ? <Problem error={error} retry={refresh} /> : data && metrics && <>
+      {data.errors > 0 && <div role="alert" className={`${panel} flex flex-wrap items-center justify-between gap-3 text-sm`}>Some data could not be loaded. Unavailable counts are shown as “Unavailable”, never as zero. <Button variant="outline" size="sm" onClick={refresh}>Retry data</Button></div>}
+      {(knowledge || people) && <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:gap-6">
+        {knowledge && <>
+          <StatCard icon={Target} tone="success" href="/app/reviews" label="Mandatory coverage" value={metrics.validationCount === null ? "Unavailable" : pct(metrics.coverage)} note={metrics.validationCount ? `${metrics.validationCount} validation results` : "No validations yet"} />
+          <StatCard icon={Link2} tone="info" href="/app/reviews" label="Source traceability" value={metrics.validationCount === null ? "Unavailable" : pct(metrics.traceability)} note={!metrics.validationCount ? "No validations yet" : metrics.tracedCount ? `${metrics.tracedCount} results measured` : "Not recorded for these results"} />
+          <StatCard icon={Flag} tone="danger" href="/app/reviews" label="Flagged items" value={metrics.flagged === null ? "Unavailable" : String(metrics.flagged)} note="Items needing review" />
+        </>}
+        {people && <StatCard icon={Users} tone="primary" href="/app/employees" label="Employees" value={metrics.employees === null ? "Unavailable" : String(metrics.employees)} note="Total employees" />}
+      </div>}
       {knowledge && <RunSignals runs={data.runs?.items ?? null} validations={data.validations?.items ?? null} />}
       {!people && <Empty title="Your employee workspace">Your account is active. Contact your Training Manager for your onboarding assignment. Generation drafts and review evidence are restricted to authorized authors and reviewers.<div className="mt-4"><Button asChild variant="outline"><Link href="/app/settings">View your account</Link></Button></div></Empty>}
-      {knowledge && <div className="grid gap-5 xl:grid-cols-2"><section className={`${panel} space-y-4`}><div className="flex items-center justify-between"><h2 className="font-semibold">Recent documents</h2><Link href="/app/documents" className="text-sm text-primary hover:underline">Open library</Link></div>{data.documents === null ? <p className="text-sm">Document data unavailable.</p> : !data.documents.items.length ? <p className="text-sm text-muted-foreground">No documents in this page. Open the library to upload or review source evidence.</p> : data.documents.items.slice(0, 5).map((d) => <div key={d.id} className="border-t border-border pt-3"><p className="text-sm font-medium">{d.title}</p><p className="mt-1 text-xs text-muted-foreground">{d.document_code} · {humanize(d.category)}</p></div>)}</section>
-      <section className={`${panel} space-y-4`}><div className="flex items-center justify-between"><h2 className="font-semibold">Validation decisions</h2><Link href="/app/reviews" className="text-sm text-primary hover:underline">Review evidence</Link></div>{data.validations === null ? <p className="text-sm">Validation data unavailable.</p> : !data.validations.items.length ? <p className="text-sm text-muted-foreground">No validation runs in this page. Only accepted generated plans can enter validation.</p> : data.validations.items.slice(0, 5).map((v) => <Link href={`/app/reviews/${v.id}`} key={v.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3"><StateBadge value={v.jev_decisions?.status ?? "UNKNOWN"} /><span className="text-xs">{v.summary.finding_count} findings · {new Date(v.completed_at).toLocaleDateString()}</span></Link>)}</section></div>}
+      {knowledge && <div className="grid gap-6 2xl:grid-cols-2">
+        <section className="space-y-3"><div className="flex items-center justify-between"><h2 className="card-title">Validation decisions</h2><Link href="/app/reviews" className="text-sm font-medium text-primary hover:underline">View all</Link></div>
+          {data.validations === null ? <Empty title="Validation data unavailable">Retry to load recorded validation results.</Empty> : !data.validations.items.length ? <Empty title="No validation results yet">Only accepted generated plans can enter independent validation.</Empty> :
+          <DataTable headers={["Decision", "Coverage", "Traceability", "Findings", "Completed"]}>{data.validations.items.slice(0, 6).map((v) => <tr key={v.id}><td><Link href={`/app/reviews/${v.id}`} aria-label={`Open validation ${v.id.slice(0, 8)}`}><StateBadge value={v.jev_decisions?.status ?? v.decision?.status ?? "UNKNOWN"} /></Link></td><td className="whitespace-nowrap">{v.summary.mandatory_covered}/{v.summary.mandatory_total}</td><td className="whitespace-nowrap">{v.summary.generated_items_total ? `${v.summary.generated_items_traceable ?? 0}/${v.summary.generated_items_total}` : "—"}</td><td>{v.summary.finding_count}</td><td className="whitespace-nowrap text-muted-foreground">{new Date(v.completed_at).toLocaleDateString()}</td></tr>)}</DataTable>}
+        </section>
+        <section className="space-y-3"><div className="flex items-center justify-between"><h2 className="card-title">Recent documents</h2><Link href="/app/documents" className="text-sm font-medium text-primary hover:underline">Open library</Link></div>
+          {data.documents === null ? <Empty title="Document data unavailable">Retry to load the document library.</Empty> : !data.documents.items.length ? <Empty title="No documents yet">Open the library to upload or review source evidence.</Empty> :
+          <DataTable headers={["Document", "Code", "Category", "Status"]}>{data.documents.items.slice(0, 6).map((d) => <tr key={d.id}><td className="font-medium">{d.title}</td><td className="whitespace-nowrap font-mono text-xs text-muted-foreground">{d.document_code}</td><td>{humanize(d.category)}</td><td><StateBadge value={d.status} /></td></tr>)}</DataTable>}
+        </section>
+      </div>}
+      {!reports && knowledge && <WorkflowRail />}
       {reports && <>
-        {knowledge && <section className="space-y-4"><h2 className="font-semibold">JEV distribution in loaded page</h2>{data.validations?.items.length ? <DataTable headers={["Decision", "Recorded validations"]}>{Object.entries(data.validations.items.reduce<Record<string, number>>((counts, v) => { const status = v.jev_decisions?.status ?? "UNKNOWN"; counts[status] = (counts[status] ?? 0) + 1; return counts; }, {})).map(([status, count]) => <tr key={status}><td><StateBadge value={status} /></td><td>{count}</td></tr>)}</DataTable> : <Empty title={data.validations ? "No validation runs in this page" : "Validation data unavailable"}>No distribution is inferred without recorded validation results.</Empty>}</section>}
-        {data.employees && <section className="space-y-4"><h2 className="font-semibold">Employee onboarding in loaded page</h2><DataTable headers={["Employee", "Onboarding status", "Joining date"]}>{data.employees.map((e) => <tr key={e.id}><td><Link className="text-primary hover:underline" href={`/app/employees/${e.id}`}>{e.employee_code}</Link></td><td><StateBadge value={e.training_status} /></td><td>{e.joining_date}</td></tr>)}</DataTable>{!data.employees.length && <p className="text-sm text-muted-foreground">No employee records in this page.</p>}</section>}
+        {knowledge && <section className="space-y-3"><h2 className="card-title">JEV distribution in loaded page</h2>{data.validations?.items.length ? <DataTable headers={["Decision", "Recorded validations"]}>{Object.entries(data.validations.items.reduce<Record<string, number>>((counts, v) => { const status = v.jev_decisions?.status ?? "UNKNOWN"; counts[status] = (counts[status] ?? 0) + 1; return counts; }, {})).map(([status, count]) => <tr key={status}><td><StateBadge value={status} /></td><td>{count}</td></tr>)}</DataTable> : <Empty title={data.validations ? "No validation runs in this page" : "Validation data unavailable"}>No distribution is inferred without recorded validation results.</Empty>}</section>}
+        {data.employees && <section className="space-y-3"><h2 className="card-title">Employee onboarding in loaded page</h2><DataTable headers={["Employee", "Onboarding status", "Joining date"]}>{data.employees.map((e) => <tr key={e.id}><td><Link className="text-primary hover:underline" href={`/app/employees/${e.id}`}>{e.employee_code}</Link></td><td><StateBadge value={e.training_status} /></td><td>{e.joining_date}</td></tr>)}</DataTable>{!data.employees.length && <p className="text-sm text-muted-foreground">No employee records in this page.</p>}</section>}
         <Pager offset={offset} count={Math.max(data.employees?.length ?? 0, data.documents?.items.length ?? 0, data.runs?.items.length ?? 0, data.validations?.items.length ?? 0)} more={!!(data.documents?.has_more || data.runs?.has_more || data.validations?.has_more || data.employees?.length === 30)} change={setOffset} />
       </>}
     </>}

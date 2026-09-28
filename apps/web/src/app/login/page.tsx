@@ -40,7 +40,7 @@ export default function LoginPage() {
 
   return <main className="grid min-h-screen lg:grid-cols-[minmax(0,1.1fr)_minmax(420px,0.9fr)]">
     <div className="flex min-h-64 flex-col justify-between bg-sidebar px-7 py-8 text-sidebar-foreground sm:px-12 lg:min-h-screen lg:px-16 lg:py-12">
-      <div className="flex items-center gap-3"><span className="rounded-md bg-primary p-2"><BookOpenCheck size={22} aria-hidden="true" /></span><span className="text-lg font-bold tracking-tight">SkillSprint AI</span></div>
+      <div className="flex items-center gap-3"><span className="rounded-md bg-primary-solid p-2 text-primary-foreground"><BookOpenCheck size={22} aria-hidden="true" /></span><span className="text-lg font-bold tracking-tight">SkillSprint AI</span></div>
       <div className="hidden max-w-xl lg:block"><p className="text-xs font-bold uppercase tracking-[0.16em] text-sidebar-muted">Training intelligence workspace</p><h1 className="mt-5 text-4xl font-bold leading-tight tracking-tight">Onboarding work, organized around what matters.</h1><p className="mt-5 max-w-md text-base leading-7 text-sidebar-muted">A focused space for teams to manage learning, evidence, and progress with clarity.</p></div>
       <p className="hidden text-xs text-sidebar-muted lg:block">SkillSprint AI · Authorized workspace</p>
     </div>
