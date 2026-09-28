@@ -160,6 +160,12 @@ All tests are offline: provider HTTP is mocked and there are no live API calls.
 - **Policy precedence** is configurable per matrix (Ground Truth / RRM → precedence ranks; a higher rank means more authority). Document the hierarchy used for your company pack here: _Latest approved policy > Department SOP > FAQ > Informal guidance_ (edit to match your configuration).
 - **Provenance.** Every run records the provider, model, prompt version, template hash, projection hash, input snapshot hash, and timestamps.
 
+### Authoring requirements
+
+When you create requirements for a role in Ground Truth / RRM, **link each requirement only to the chunk that states its obligation** (for example "The employee must complete X within 2 calendar days after the employee's joining date"). Do not also link shared chunks such as definitions ("Joining date: …", "Calendar day: …") or scope text ("This standard applies to …") unless the obligation genuinely cannot be evidenced without them.
+
+This matters because the validator requires every generated item to cite *all* of its requirement's evidence. Each extra shared chunk is therefore repeated on every objective, task, quiz and checklist item, which inflates the model output and can push generation past its deadline. Structured timing can usually be evidenced entirely from the obligation sentence: it contains the relation, number, unit, calendar basis and trigger.
+
 ## 9. Troubleshooting
 
 | Symptom | Cause / fix |

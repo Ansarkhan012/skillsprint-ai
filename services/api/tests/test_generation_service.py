@@ -518,3 +518,28 @@ def test_run_budget_skips_a_retry_that_could_not_finish_in_time(call_deadline, e
     result, delays = execute(unavailable)
     assert result.error_code == "PROVIDER_UNAVAILABLE"
     assert result.provider_calls == (3 if call_deadline == 100 else 1)
+
+
+def test_gemini_thinking_level_is_optional_and_sent_only_when_configured(monkeypatch):
+    for name, value in {"AI_PROVIDER": "gemini", "GEMINI_MODEL": "mock-model", "GEMINI_API_KEY": "test-only"}.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("GEMINI_THINKING_LEVEL", "")
+    assert GeminiEnvironment().adapter_config().thinking_level is None
+    monkeypatch.setenv("GEMINI_THINKING_LEVEL", "low")
+    assert GeminiEnvironment().adapter_config().thinking_level == "low"
+    monkeypatch.setenv("GEMINI_THINKING_LEVEL", "off")
+    with pytest.raises(ProviderFailure, match="PROVIDER_CONFIGURATION_FAILED"):
+        GeminiEnvironment().adapter_config()
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"candidates": [{"finishReason": "STOP", "content": {
+            "parts": [{"text": json.dumps(complete_output())}]}}]})
+
+    async def scenario(level):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await GeminiProvider(client, ProviderConfig(model="mock-model", api_key="k", thinking_level=level)).generate(build_prompt(ready().snapshot))
+    asyncio.run(scenario(None)); asyncio.run(scenario("low"))
+    assert "thinkingConfig" not in bodies[0]["generationConfig"]
+    assert bodies[1]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "low"}

@@ -1,7 +1,7 @@
 """Provider-neutral result/error types and backend-only generation adapters."""
 
 import asyncio
-from typing import Protocol
+from typing import Literal, Protocol
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
@@ -25,6 +25,8 @@ class ProviderConfig(BaseModel):
     timeout_seconds: float = Field(default=20, ge=1, le=180)
     max_output_tokens: int = Field(default=8192, ge=256, le=65536)
     temperature: float = Field(default=0.1, ge=0, le=1)
+    # Gemini only: generationConfig.thinkingConfig.thinkingLevel; None sends nothing (model default).
+    thinking_level: Literal["low", "medium", "high"] | None = None
 
 
 class GeminiEnvironment(BaseSettings):
@@ -37,6 +39,7 @@ class GeminiEnvironment(BaseSettings):
     gemini_timeout_seconds: float = 20
     gemini_max_output_tokens: int = 8192
     gemini_temperature: float = 0.1
+    gemini_thinking_level: str | None = None  # low|medium|high; blank = model default
 
     def adapter_config(self) -> ProviderConfig:
         if self.ai_provider != "gemini" or not self.gemini_model or not self.gemini_api_key:
@@ -45,7 +48,8 @@ class GeminiEnvironment(BaseSettings):
             return ProviderConfig(provider="gemini", model=self.gemini_model, api_key=self.gemini_api_key,
                                   timeout_seconds=self.gemini_timeout_seconds,
                                   max_output_tokens=self.gemini_max_output_tokens,
-                                  temperature=self.gemini_temperature)
+                                  temperature=self.gemini_temperature,
+                                  thinking_level=self.gemini_thinking_level or None)
         except ValueError:
             raise ProviderFailure("PROVIDER_CONFIGURATION_FAILED") from None
 
@@ -144,6 +148,8 @@ class GeminiProvider:
                                  "temperature": self.config.temperature,
                                  "maxOutputTokens": self.config.max_output_tokens},
         }
+        if self.config.thinking_level:
+            payload["generationConfig"]["thinkingConfig"] = {"thinkingLevel": self.config.thinking_level}
         if format_retry:
             payload["systemInstruction"]["parts"][0]["text"] += "\n" + FORMAT_RETRY_RULE
         encoded = httpx.Request("POST", "https://invalid.local", json=payload).content
