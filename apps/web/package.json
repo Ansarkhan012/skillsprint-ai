@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "test": "node --test tests/*.test.mjs",
     "test:auth": "node --test tests/login-form-security.test.mjs",
     "test:rrm": "node --test tests/rrm-workflow.test.mjs",
     "typecheck": "tsc --noEmit"

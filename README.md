@@ -1,42 +1,151 @@
 # SkillSprint AI
 
-Phase 1 foundation: Next.js web app, FastAPI/Python API, and Supabase PostgreSQL/Auth/RLS infrastructure. Supabase is the selected implementation, not an explicit SRS requirement. Later RRM, GenAI, and onboarding features remain in the architecture documents.
+SkillSprint AI turns approved company documents into personalised, source-grounded employee onboarding plans. A **GenAI pipeline** drafts the plan as structured JSON, and an **independent, deterministic Python pipeline** verifies it against a human-approved Role Requirement Matrix (RRM) before anything is trusted.
 
-Phase 2 document intelligence is locked after project-owner closeout. Its migration has been applied to the live project. See [Phase 2 implementation and verification notes](docs/PHASE2_DOCUMENT_INTELLIGENCE.md); detailed direct RLS/Storage attack checks remain pending.
+| Layer | Technology | Location |
+|---|---|---|
+| Web UI | Next.js / React / TypeScript | `apps/web` |
+| API | FastAPI, Python 3.12 | `services/api/app` |
+| Database, auth, storage | Supabase (PostgreSQL + RLS, Auth, private Storage) | `supabase/migrations` |
+| Document processing | PyMuPDF (PDF), python-docx (DOCX) | `document_processing.py`, `documents.py` |
+| Adversarial-content scanner | Deterministic rules | `adversarial.py` |
+| Role Requirement Matrix | Python rules + SQL | `rrm*.py` |
+| GenAI pipeline | Gemini / Groq / NaraRouter (OpenAI-compatible) adapters | `generation_*.py`, `nararouter_provider.py` |
+| Prompt templates and versions | Versioned, hashed templates | `generation_prompt.py` (`phase4d-compact-context/2.0.0`) |
+| Output JSON schema | Strict Pydantic model (`onboarding-plan/1.0.0`) | `generation_output.py` |
+| Python validation + decision | Validator, JEV decision table | `plan_validator.py`, `jev.py` |
+| GenAI vs Python comparison | CSV report | `comparison_report.py` |
 
-## Prerequisites
+Design documents: `ARCHITECTURE.md`, `DATABASE_DESIGN.md`, `GENAI_CONTRACT.md`, `VALIDATION_DESIGN.md`, `JEV_DESIGN.md`, `API_CONTRACTS.md`, `SRS_MATRIX.md`. AI tool usage: `AI_USAGE.md`.
 
+## 1. Prerequisites
+
+- **Python 3.12** (pinned in `.python-version`). Python 3.14 is not supported: a mixed 3.14 venv fails with `No module named 'pydantic_core._pydantic_core'`.
 - Node.js 20 or later and npm
-- Python 3.12
-- Supabase project with Auth and PostgreSQL
-- Phase 2 backend parser dependencies from `services/api/requirements.txt` (PyMuPDF, python-docx, python-multipart)
+- A Supabase project (PostgreSQL, Auth, Storage)
+- An API key for at least one GenAI provider (see section 3)
 
-## Configuration
+## 2. Install
 
-Copy `.env.example` to a private root `.env` for the API. Set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `WEB_ORIGIN`, and other server values as needed. The `NEXT_PUBLIC_*` values are the public Supabase URL and anon key only. Put `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `API_BASE_URL` in `apps/web/.env.local` for Next.js. Never put `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, or `GEMINI_API_KEY` into a `NEXT_PUBLIC_` variable.
-
-Apply `supabase/migrations/202609230001_foundation.sql` through your Supabase migration workflow. This migration creates no user or sample business records. Create an Auth user through Supabase, then insert its matching `profiles` row and an `ADMIN` membership from a trusted SQL editor. Do not use public signup for administrator bootstrap. The migration contains no credentials.
-
-## Run locally
-
-From the repository root:
+From the repository root (PowerShell):
 
 ```powershell
+py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r services\api\requirements.txt
+cd apps\web
+npm install
+```
+
+## 3. Configure (secrets stay local)
+
+1. Copy `.env.example` to `.env` in the **repository root**. It is used by the API, and `.env` is gitignored.
+2. Set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (backend only), and `WEB_ORIGIN`.
+3. Choose the GenAI provider with `AI_PROVIDER`. There is no automatic cross-provider fallback: each run records exactly one provider and model. To switch, change `AI_PROVIDER` and restart.
+
+   | `AI_PROVIDER` | Required variables | Notes |
+   |---|---|---|
+   | `nararouter` | `NARAROUTER_API_KEY`, `NARAROUTER_BASE_URL`, `NARAROUTER_MODEL=gemini-3.8-flash-high` | Requires migrations `202609270002` and `202609280001`. Use `NARAROUTER_MAX_OUTPUT_TOKENS=16384`, `NARAROUTER_TIMEOUT_SECONDS=60` |
+   | `gemini` | `GEMINI_API_KEY`, `GEMINI_MODEL` | The Gemini free tier allows only about 20 requests/day per model |
+   | `groq` | `GROQ_API_KEY` (`GROQ_MODEL=openai/gpt-oss-20b`) | Free-tier tokens-per-minute limits can reject full plans (HTTP 413) |
+
+4. Create `apps/web/.env.local` containing `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `API_BASE_URL=http://127.0.0.1:8000`, and the same `MAX_UPLOAD_BYTES`.
+
+Never put a provider key, `SUPABASE_SERVICE_ROLE_KEY`, or `DATABASE_URL` in a `NEXT_PUBLIC_*` variable, and never commit `.env`.
+
+## 4. Database
+
+Apply the migrations in `supabase/migrations` **once each, in filename order**, using the Supabase SQL editor or your migration workflow. The later ones are manual, reviewed steps:
+
+- `202609270002_nararouter_generation_provider.sql` and `202609280001_nararouter_model_constraint.sql`: run `docs/NARAROUTER_LIVE_CONTRACT_CHECK.sql` first.
+- `202609280002_validation_warning_findings.sql`: lets *Verified with Warning* results (for example staged timing warnings) be saved.
+
+Bootstrap:
+
+1. Create the first Auth user in Supabase. Insert its `profiles` row and an `ADMIN` role from the SQL editor; see `supabase/testing/bootstrap_existing_auth_user_role.sql`. Public signup cannot grant roles.
+2. Create the standard onboarding stage set (Day 1 → First 90 Days) once, as an Admin. This step has no UI button yet:
+   `POST http://127.0.0.1:8000/api/v1/onboarding-stage-sets/bootstrap` with header `Authorization: Bearer <admin access token>`.
+
+## 5. Run
+
+Start the API from the **repository root**. `.env` is read from the working directory; starting elsewhere causes `GENERATION_PROVIDER_NOT_CONFIGURED`.
+
+```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir services\api --reload
 ```
 
-In another terminal:
+In a second terminal:
 
 ```powershell
 cd apps\web
-npm install
 npm run dev
 ```
 
-Open `http://localhost:3000/login`. The API health endpoint is `http://127.0.0.1:8000/api/v1/health`. Protected API endpoints require a valid Supabase access token and an active profile with an assigned application role.
+Open `http://localhost:3000/login`. API health: `http://127.0.0.1:8000/api/v1/health`.
 
-## Phase 1 permissions
+## 6. Test
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest services\api\tests -q
+cd apps\web
+npm test
+npm run lint
+npm run typecheck
+npm run build
+```
+
+All tests are offline: provider HTTP is mocked and there are no live API calls.
+
+## 7. Evaluator walkthrough
+
+1. **Login** as Admin or Training Manager.
+2. **Upload documents** (Documents → Upload). Use PDF or DOCX with a code, title, category, version label, and effective date. Python validates the file type, size, signature, and duplicate checksum, then extracts text with page/paragraph/table locators and chunks it. Chunks with suspected prompt-injection or adversarial instructions show a **"Possible prompt injection"** badge. They are treated as data and never executed.
+3. **Submit → approve** each version. A different reviewer approves it; a new version supersedes the old one once effective.
+4. **Create roles and employees** (Departments & roles, Employees).
+5. **Build the Role Requirement Matrix** (Ground Truth / RRM). Author requirements linked to evidence chunks with mandatory/optional status, priority, stage, timing, and dependencies. Resolve conflicts using the configured precedence, then submit and approve the matrix.
+6. **Generate an onboarding plan** (Onboarding Plans → Check readiness → Generate once). The result is *Unverified* until validated.
+7. **Run validation** (Validate on the plan). The deterministic Python validator reports:
+   - mandatory coverage
+   - source traceability
+   - missing, unsupported, and contradictory requirements
+   - dependency order
+   - duplicates
+   - stale or outdated sources
+
+   The JEV decision is one of: Verified, Verified with Warning, Incomplete, Unsupported, Contradictory, or Manual Review.
+8. **Review comparison, hallucination, and contradiction findings** (Validation & Reviews). Export **"GenAI vs Python comparison (CSV)"** for the requirement-level report.
+9. **Approve, reject, regenerate, or override** (reviewer/Admin). The original JEV result is never rewritten.
+10. **Update a policy.** Upload a new version of the same document. Re-validating plans that used the old evidence reports `OUTDATED_SOURCE` / `STALE_INPUT`.
+
+## 8. Key behaviours
+
+- **Coverage score** = covered mandatory requirements ÷ mandatory requirements. A requirement counts as covered only through a module with valid, approved source support.
+- **Traceability score** = generated items whose every source reference (document version + chunk + locator) is approved evidence for each requirement they cite ÷ all generated items. It is also reported separately for mandatory-module content.
+- **Hallucination handling.** Requirement IDs or sources not in the approved matrix are flagged `UNSUPPORTED_REQUIREMENT` / `SOURCE_REFERENCE_INVALID`. The model is instructed to use `insufficient_information` rather than invent rules, and any such entry is routed to Manual Review.
+- **Prompt injection.**
+  - The model receives the approved requirement statements and source references, never raw document text.
+  - Supplied data is wrapped and labelled as untrusted.
+  - The validator ignores any claims the model makes about its own output.
+  - Uploads are scanned for adversarial instructions and flagged for review.
+- **Structured output.** The provider receives a JSON Schema derived from the Pydantic model. Python then re-validates strictly. A schema failure gets exactly one format retry that names the failing fields.
+- **Retries.** Timeouts, 5xx, and 429 responses get at most 3 attempts with 2 s / 4 s backoff (capped at 8 s). Every attempt is logged and persisted. HTTP 402 is reported as `PROVIDER_PAYMENT_REQUIRED`.
+- **Timing.** Structured timing on a requirement with an assigned stage is checked at stage level and adds a warning (Verified with Warning). Ambiguous or unstaged timing requires manual review.
+- **Policy precedence** is configurable per matrix (Ground Truth / RRM → precedence ranks; a higher rank means more authority). Document the hierarchy used for your company pack here: _Latest approved policy > Department SOP > FAQ > Informal guidance_ (edit to match your configuration).
+- **Provenance.** Every run records the provider, model, prompt version, template hash, projection hash, input snapshot hash, and timestamps.
+
+## 9. Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| `No module named 'pydantic_core._pydantic_core'` | The venv was not created with Python 3.12. Recreate `.venv` (section 2) |
+| `GENERATION_PROVIDER_NOT_CONFIGURED` (503) | Missing provider variables, or the API was not started from the repository root |
+| `PROVIDER_PAYMENT_REQUIRED` | The provider account has no credits. Top up or switch `AI_PROVIDER` |
+| `PROVIDER_RATE_LIMIT` / `PROVIDER_UNAVAILABLE` after 3 attempts | Provider quota or overload. Wait, or switch provider |
+| `GENERATION_PROJECTION_TOO_LARGE` on Groq | Free-tier tokens-per-minute limit. Use another provider |
+| `SCHEMA_INVALID` | The model output did not match `onboarding-plan/1.0.0` after one retry. Server logs list only field paths |
+| Generation fails at reservation (422/409) | The provider/model pair or prompt pin is not in the database. Apply the migrations in section 4 |
+| `VALIDATION_STATE_CONFLICT` when saving a Verified-with-Warning result | Apply `202609280002_validation_warning_findings.sql` |
+
+## 10. Permissions
 
 | Role | Profile | Directory read | Create department | Create role/employee | Admin check |
 |---|---|---|---|---|---|
@@ -46,33 +155,17 @@ Open `http://localhost:3000/login`. The API health endpoint is `http://127.0.0.1
 | Manager | Own | Departments/roles; own team employees | No | No | No |
 | Employee | Own | No directory access | No | No | No |
 
-The API enforces server-side RBAC before each operation. Supabase RLS provides database-level protection for rows and writes. Client navigation visibility is not authorization. A missing, inactive, or roleless profile is denied. Initial Admin bootstrap is a trusted SQL operation because public self-registration cannot grant roles.
+The API enforces RBAC on the server before each operation, and Supabase RLS protects rows and writes. Client navigation visibility is not authorization. Detailed live RLS checks are in `docs/PHASE1_RBAC_RLS_VERIFICATION.md`.
 
-## Verify
+## 11. Limitations
 
-```powershell
-.\.venv\Scripts\python.exe -m pytest services\api\tests -q
-cd apps\web
-npm run lint
-npm run typecheck
-npm run build
-```
+- Requirements are authored by people in the RRM (with evidence links). They are not extracted automatically, because the matrix is the approved ground truth.
+- Factual entailment of generated prose is not machine-checked. Grounding is enforced through requirement IDs and approved source references.
+- Employee progress tracking, weak-area detection, adaptive recommendations, impact analysis, selective regeneration, and the consistency score (SRS Steps 44–45, 50–59) are not implemented.
+- OCR is not used. Scanned PDFs without text are marked *Needs review*.
 
-## RLS verification in a connected Supabase project
+## 12. Links
 
-1. Confirm all six Phase 1 public tables have RLS enabled.
-2. With an anonymous session, verify reads of profiles, roles, departments, employees, and audit logs return no rows.
-3. With an active Employee token, verify only the employee's own profile and membership are readable; department/role directory and audit logs remain denied.
-4. With a Manager token, verify only their own employee row and direct reports are visible in `employees`.
-5. With a Training Manager token, verify role and employee access works but profile-role assignment and audit-log reads are denied.
-6. With a Reviewer token, verify read access to directory data and denial of writes.
-7. With an Admin token, verify authorized foundation writes create audit events; direct client inserts into `audit_logs` remain denied.
-8. Set a profile to `INACTIVE` and confirm API access is denied even while the Supabase session remains valid.
-
-The project owner reports that the migration was applied and all five role logins and dashboards were manually verified. The detailed live row-level RLS checks in `docs/PHASE1_RBAC_RLS_VERIFICATION.md` remain a separate manual verification procedure; login success does not itself prove every RLS policy.
-
-## Phase 2 document intelligence (locked)
-
-The Documents workspace accepts PDF and DOCX originals through FastAPI. Python validates file signatures, hashes actual bytes, extracts source-located text, and chunks it deterministically. The initial upload limit is 15 MB (`MAX_UPLOAD_BYTES`); set it consistently on FastAPI and the Next.js server. Phase 2 processing finalization requires a backend-only `SUPABASE_SERVICE_ROLE_KEY`; authoring and review remain user-JWT scoped. Never place that credential in `NEXT_PUBLIC_*` or the browser. OCR and embeddings are not used. Scanned/unextractable PDFs become `NEEDS_REVIEW`, not invented text. Only Admin/Training Manager can upload or submit; Reviewer/Admin can review, but cannot review their own version without explicit Admin override and a reason. Current-effective ground truth requires an approved, parsed, date-effective version, not merely the latest upload. Supabase is the infrastructure boundary for private Storage and PostgreSQL/RLS; parsing and chunking are portable Python logic.
-
-Do **not** reapply `supabase/migrations/202609230002_document_intelligence.sql` automatically. The project owner applied it manually. Direct live RLS/Storage attack verification remains separately documented and pending. Phase 1's applied migration remains unchanged.
+- Deployed application: _TODO_
+- Demonstration video (.mp4): _TODO_
+- Technical blog: _TODO_

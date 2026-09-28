@@ -1,5 +1,17 @@
 # AI Usage Declaration
 
+## Pre-submission audit and GenAI fixes — 2026-09-28
+
+| Field | Value |
+|---|---|
+| Tool | Claude Code (Anthropic, model Claude Opus 5.5) |
+| Purpose | Read-only SRS audit (`AUDIT_REPORT.md`), root-cause analysis of rejected GenAI responses, then approved fixes one at a time |
+| Prompt or assistance type | Team-directed agentic coding: audit against the SRS, live diagnostic probes with minimal requests, then small reviewed changes with tests and one commit per item |
+| Files/modules affected | `generation_provider.py`, `nararouter_provider.py`, `generation_service.py`, `generation_prompt.py`, `plan_validator.py`, `jev.py`, `validation_models.py`, `validation_api.py`, new `adversarial.py` and `comparison_report.py`, `documents.py`; web `documents-workspace.tsx`, `reviews.tsx`, `intelligence.tsx`, `lib/product.ts`, `lib/documents.ts`, gateway route; migration `202609280002_validation_warning_findings.sql`; tests; `README.md`; `.python-version` |
+| Modification performed | (1) HTTP 402 mapped to `PROVIDER_PAYMENT_REQUIRED`. (2) Provider-side JSON Schema derived from the Pydantic output model (root cause: valid JSON missing required module fields). (3) Format retry names the failing schema fields. (4) Deeply nested JSON handled as malformed. (5) Exponential backoff, max 3 attempts, for 5xx/timeout/429. (6) Staged structured timing gives a warning instead of forcing manual review, plus the matching DB predicate migration. (7) Deterministic adversarial-instruction flagging for uploads. (8) Source traceability score. (9) GenAI vs Python comparison CSV export. (10) Removed an unauthenticated visual QA page; README rewrite. No hard-coded plans, scores or provider responses; the prompt text and template hash are unchanged |
+| Tests performed | Backend pytest after every change (final: 694 passed, 0 failed); frontend `node --test` 64 passed, `tsc`, `eslint`, `next build`. Live provider checks: tiny probes plus fixture-based full-prompt runs on Groq (schema-valid 2/2 after the fix, previously 1/5); NaraRouter returned 402 (no credits) and Gemini hit its free-tier daily quota, so those providers are not yet verified end to end |
+| Verifying team member | _Pending: to be completed by the team member who reviews these commits_ |
+
 ## Phase 3 closure candidate — 2026-09-24
 
 | Field | Value |
