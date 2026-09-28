@@ -117,6 +117,9 @@ def parse_plan(text: str, request_id: UUID, snapshot: GenerationInputSnapshot) -
         decoded = json.loads(text, object_pairs_hook=_unique_pairs, parse_constant=_reject_constant)
         # JSON-mode Pydantic parsing preserves strict primitives while accepting UUID/date JSON strings.
         plan = OnboardingPlan.model_validate_json(json.dumps(decoded, ensure_ascii=False))
+    except RecursionError:
+        # Pathologically nested JSON exhausts the decoder stack; it is malformed output, not a crash.
+        raise StructuralFailure("MALFORMED_JSON") from None
     except (ValueError, TypeError, ValidationError) as exc:
         if isinstance(exc, StructuralFailure):
             raise
