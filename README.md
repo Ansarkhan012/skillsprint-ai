@@ -44,7 +44,7 @@ npm install
 
    | `AI_PROVIDER` | Required variables | Notes |
    |---|---|---|
-   | `nararouter` (default) | `NARAROUTER_API_KEY`, `NARAROUTER_BASE_URL`, `NARAROUTER_MODEL=agnes-2.5-flash` | Free-plan model. Requires migrations up to `202609280003`. Use `NARAROUTER_MAX_OUTPUT_TOKENS=16384`, `NARAROUTER_TIMEOUT_SECONDS=60`. See the model notes below |
+   | `nararouter` (default) | `NARAROUTER_API_KEY`, `NARAROUTER_BASE_URL`, `NARAROUTER_MODEL=agnes-2.5-flash` | Free-plan model. Requires migrations up to `202609280004`. Use `NARAROUTER_MAX_OUTPUT_TOKENS=16384`, `NARAROUTER_TIMEOUT_SECONDS=180`. See the model notes below |
    | `gemini` | `GEMINI_API_KEY`, `GEMINI_MODEL` | The Gemini free tier allows only about 20 requests/day per model |
    | `groq` | `GROQ_API_KEY` (`GROQ_MODEL=openai/gpt-oss-20b`) | Free-tier tokens-per-minute limits can reject full plans (HTTP 413) |
 
@@ -59,7 +59,7 @@ npm install
    | `agnes-3-flash` | model default | Truncated at 16,384 output tokens after 3–5 minutes |
    | `gemini-3.8-flash-high` | — | Pay-as-you-go: HTTP 402 (`PROVIDER_PAYMENT_REQUIRED`) without credits |
 
-   `NARAROUTER_TIMEOUT_SECONDS` (max 60) is a **total** deadline per provider call. Overruns fail with `PROVIDER_DEADLINE_EXCEEDED` and are not retried. No free model currently produces a complete single-call plan within 60 s, so full-plan generation with the free models exceeds the deadline and the SRS 30-second target. See Limitations.
+   `NARAROUTER_TIMEOUT_SECONDS` (max 180, default 180) is a **total** deadline per provider call. Overruns fail with `PROVIDER_DEADLINE_EXCEEDED` and are not retried. A whole run is capped at 240 s: a retry is skipped if one more full call could not finish within it. See Limitations.
 
 4. Create `apps/web/.env.local` containing `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `API_BASE_URL=http://127.0.0.1:8000`, and the same `MAX_UPLOAD_BYTES`.
 
@@ -71,6 +71,7 @@ Apply the migrations in `supabase/migrations` **once each, in filename order**, 
 
 - `202609270002_nararouter_generation_provider.sql` and `202609280001_nararouter_model_constraint.sql`: run `docs/NARAROUTER_LIVE_CONTRACT_CHECK.sql` first.
 - `202609280003_nararouter_free_models.sql`: allows the free-plan NaraRouter models `agnes-2.5-flash`, `agnes-3-flash` and `nemotron-3-ultra-free`.
+- `202609280004_generation_timeout_180.sql`: raises the per-call deadline bound from 60 s to 180 s.
 - `202609280002_validation_warning_findings.sql`: lets *Verified with Warning* results (for example staged timing warnings) be saved.
 
 Bootstrap:
@@ -189,7 +190,7 @@ The API enforces RBAC on the server before each operation, and Supabase RLS prot
 - Requirements are authored by people in the RRM (with evidence links). They are not extracted automatically, because the matrix is the approved ground truth.
 - Factual entailment of generated prose is not machine-checked. Grounding is enforced through requirement IDs and approved source references.
 - Employee progress tracking, weak-area detection, adaptive recommendations, impact analysis, selective regeneration, and the consistency score (SRS Steps 44–45, 50–59) are not implemented.
-- Full-plan generation on the free NaraRouter models takes about 2 minutes; the configured 60 s total deadline stops it. Generating per stage (smaller outputs, run in parallel) is the planned fix.
+- **Latency:** full-plan generation on the free NaraRouter models takes about 136 s (agnes-2.5-flash), against the SRS 30-second target. The backend allows up to 180 s per provider call and 240 s per run so it completes. Per-stage parallel generation is designed as the fix but not implemented; see `docs/PER_STAGE_GENERATION_DESIGN.md`.
 - OCR is not used. Scanned PDFs without text are marked *Needs review*.
 
 ## 12. Links
