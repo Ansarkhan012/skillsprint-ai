@@ -505,7 +505,8 @@ def test_format_retry_names_the_failed_fields_without_model_text():
     assert "IGNORE" not in feedback and retry.untrusted_data == first.untrusted_data
 
 
-@pytest.mark.parametrize("call_deadline,expected_calls", [(100, 2), (241, 1)])
+# Instant failures leave room for a retry up to a 290 s deadline (0 + 290 <= 295); 296 never fits.
+@pytest.mark.parametrize("call_deadline,expected_calls", [(100, 2), (290, 2), (296, 1)])
 def test_run_budget_skips_a_retry_that_could_not_finish_in_time(call_deadline, expected_calls):
     from types import SimpleNamespace
     provider = FakeProvider(["not json", json.dumps(complete_output())])
@@ -517,7 +518,7 @@ def test_run_budget_skips_a_retry_that_could_not_finish_in_time(call_deadline, e
     unavailable.config = SimpleNamespace(timeout_seconds=call_deadline)
     result, delays = execute(unavailable)
     assert result.error_code == "PROVIDER_UNAVAILABLE"
-    assert result.provider_calls == (3 if call_deadline == 100 else 1)
+    assert result.provider_calls == (3 if call_deadline <= 290 else 1)
 
 
 def test_gemini_thinking_level_is_optional_and_sent_only_when_configured(monkeypatch):

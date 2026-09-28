@@ -182,7 +182,7 @@ STRUCTURAL_PROVIDER_ERRORS = {"PROVIDER_TRUNCATED", "PROVIDER_INVALID_RESPONSE"}
 MAX_TRANSPORT_RETRIES = 2
 # Whole-run budget: a retry is skipped when elapsed time plus one full provider
 # deadline would exceed it, so a slow model cannot chain two long calls.
-RUN_BUDGET_SECONDS = 240.0
+RUN_BUDGET_SECONDS = 295.0  # one full 290 s call fits; a second long call never does
 RETRY_BASE_SECONDS = 2.0
 RETRY_MAX_SECONDS = 8.0
 

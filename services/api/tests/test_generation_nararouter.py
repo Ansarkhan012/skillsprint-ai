@@ -74,7 +74,7 @@ def test_missing_configuration_fails_without_fallback(monkeypatch, name):
 @pytest.mark.parametrize('name,value', [
     ('API_KEY', ' '), ('API_KEY', 'key\r\nInjected: value'),
     ('MODEL', 'bad alias'), ('MODEL', 'x'*101), ('MODEL', 'alias\n'),
-    ('TIMEOUT_SECONDS', 'not-a-number'), ('TIMEOUT_SECONDS', '181'),
+    ('TIMEOUT_SECONDS', 'not-a-number'), ('TIMEOUT_SECONDS', '291'),
     ('MAX_OUTPUT_TOKENS', '0'), ('TEMPERATURE', '2'),
     ('BASE_URL', 'http://router.bynara.id/v1'), ('BASE_URL', 'https://user:password@router.bynara.id/v1'),
     ('BASE_URL', 'https://router.bynara.id/v1?key=hidden'), ('BASE_URL', 'https://router.bynara.id/v1#fragment'),
@@ -429,5 +429,17 @@ def test_timeout_migration_changes_only_the_deadline_bound():
     assert 'not between 1 and 180' in new and 'alter table' not in new
     assert new.lstrip().startswith('--') and '\nbegin;' in new and new.rstrip().endswith('commit;')
     assert config(timeout_seconds=180).timeout_seconds == 180
+
+
+def test_timeout_290_migration_changes_only_the_deadline_bound():
+    root = Path(__file__).resolve().parents[3]/'supabase'/'migrations'
+    previous = (root/'202609280004_generation_timeout_180.sql').read_text()
+    new = (root/'202609280005_generation_timeout_290.sql').read_text()
+    marker = 'create or replace function'
+    body = lambda text: text[text.index(marker):text.index('end $$;', text.index(marker))]
+    assert body(new).replace('not between 1 and 290', 'not between 1 and 180') == body(previous)
+    assert 'not between 1 and 290' in new and 'alter table' not in new
+    assert new.lstrip().startswith('--') and '\nbegin;' in new and new.rstrip().endswith('commit;')
+    assert config(timeout_seconds=290).timeout_seconds == 290
     with pytest.raises(ValueError):
-        config(timeout_seconds=181)
+        config(timeout_seconds=291)
