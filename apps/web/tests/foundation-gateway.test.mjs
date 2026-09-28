@@ -256,11 +256,11 @@ test("existing document POST remains allowed with its original content type", as
 test("product read routes remain exact and preserve caller auth", async () => {
   const id = "00000000-0000-4000-8000-000000000001";
   const { gateway, calls } = loadGateway({ upstreamStatus: 200, upstreamBody: [] });
-  for (const path of ["departments", "roles", "generation-runs", "validation-runs", "audit-events", `employees/${id}`, `validation-runs/${id}`, `generated-plans/${id}/validation`]) {
+  for (const path of ["departments", "roles", "generation-runs", "validation-runs", "audit-events", `employees/${id}`, `validation-runs/${id}`, `validation-runs/${id}/comparison.csv`, `generated-plans/${id}/validation`]) {
     assert.equal((await get(gateway, path)).status, 200, path);
     assert.equal(calls.at(-1).init.headers.Authorization, "Bearer synthetic-test-session");
   }
-  for (const path of ["profiles", "profile_roles", "audit_logs", "validation-runs/extra", `employees/${id}/delete`]) assert.equal((await get(gateway, path)).status, 404);
+  for (const path of ["profiles", "profile_roles", "audit_logs", "validation-runs/extra", `validation-runs/${id}/comparisonXcsv`, `employees/${id}/delete`]) assert.equal((await get(gateway, path)).status, 404);
 });
 
 test("validation writes enforce origin session JSON and forward exact human request", async () => {
