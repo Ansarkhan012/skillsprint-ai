@@ -38,6 +38,8 @@ const STATUS_TONES: Record<string, "success" | "warning" | "info" | "destructive
   INCOMPLETE: "destructive", UNSUPPORTED: "destructive", CONTRADICTORY: "destructive", REJECTED: "destructive",
   FAILED: "destructive", ERROR: "destructive", BLOCKED: "destructive",
   STALE_INPUT: "neutral", OUTDATED: "neutral", SUPERSEDED: "neutral", DRAFT: "neutral",
+  // Human review actions
+  APPROVE: "success", REJECT: "destructive", OVERRIDE: "warning", REGENERATE: "info",
 };
 const STATUS_LABELS: Record<string, string> = {
   VERIFIED_WITH_WARNING: "Verified with Warning", MANUAL_REVIEW: "Manual Review Required",
