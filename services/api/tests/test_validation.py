@@ -188,3 +188,25 @@ def test_validator_imports_have_no_provider_or_network_dependency():
         tree=ast.parse((Path(__file__).parents[1]/"app"/name).read_text())
         modules=[node.module or "" for node in ast.walk(tree) if isinstance(node,ast.ImportFrom)]
         assert not any(any(x in name for x in ("provider","httpx","generation_service")) for name in modules)
+
+
+def test_traceability_counts_every_generated_item_and_mandatory_subset():
+    frozen,plan=fixture()
+    evidence,_=check(plan,frozen)
+    assert (evidence.generated_items_total,evidence.generated_items_traceable)==(6,6)
+    assert (evidence.mandatory_items_total,evidence.mandatory_items_traceable)==(6,6)
+    # A child item citing another requirement's chunk is untraceable; the module stays traceable.
+    child=deepcopy(module(plan,0)); child={"objective_id":str(UUID(int=900)),"statement":"Know the rule",
+        "requirement_ids":child["requirement_ids"],"source_refs":deepcopy(module(plan,1)["source_refs"])}
+    module(plan,0)["learning_objectives"]=[child]
+    module(plan,2)["mandatory"]=False
+    evidence,decision=check(plan,frozen)
+    assert (evidence.generated_items_total,evidence.generated_items_traceable)==(7,6)
+    assert (evidence.mandatory_items_total,evidence.mandatory_items_traceable)==(6,5)
+    assert decision.status=="CONTRADICTORY"  # mandatory flip is still a contradiction
+
+
+def test_unparseable_plan_has_zero_traceability_denominator():
+    frozen,_=fixture()
+    evidence,_=check({"schema_version":"wrong"},frozen)
+    assert (evidence.generated_items_total,evidence.generated_items_traceable)==(0,0)

@@ -7,7 +7,7 @@ export type SourceRef = { document_id?: string; document_version_id: string; chu
 export type PlanModule = { module_id: string; title: string; purpose: string; category: string; mandatory: boolean; priority: string; difficulty: string; estimated_minutes: number; requirement_ids: string[]; source_refs: SourceRef[]; prerequisite_module_ids: string[]; checklist_items?: Array<{ checklist_item_id: string; activity: string; responsible_role: string; required: boolean }>; learning_objectives?: Array<{ objective_id: string; statement: string }>; assessments?: Array<{ assessment_id: string; title: string; instructions: string }> };
 export type Run = { id: string; employee_id: string; employee_profile_id?: string | null; created_by: string; status: string; error_code: string | null; created_at: string; provider: string; model: string; prompt_version: string; schema_version: string; matrix_id: string; matrix_revision: number; stage_set_version: number; input_hash?: string; projection_hash?: string; template_hash?: string; attempts?: Array<{ attempt_no: number; attempt_type: string; provider_outcome: string; parse_outcome: string; error_code: string | null }>; plan?: { id: string; status: string; schema_version: string; content: { plan: { title: string; summary: string; stages: Array<{ stage_id: string; label: string; sequence: number; target_start_day: number; target_end_day: number; modules: PlanModule[] }> }; insufficient_information?: Array<{ request_path: string; topic: string; reason_code: string; detail: string; requirement_id?: string | null }> } } | null };
 export type Finding = { id: string; code: string; severity: string; requirement_id: string | null; location: string; explanation: string; evidence: SourceRef[] };
-export type Validation = { id: string; generated_plan_id: string; validator_version: string; completed_at: string; summary: { mandatory_total: number; mandatory_covered: number; finding_count: number }; jev_decisions?: { status: string }; decision?: { status: string; jev_version: string }; plan_context?: Pick<Run, "id" | "employee_id" | "employee_profile_id" | "created_by"> | null; findings?: Finding[]; review_actions?: Array<{ id: string; action: string; reason: string; actor_profile_id: string; created_at: string }>; review_actions_has_more?: boolean };
+export type Validation = { id: string; generated_plan_id: string; validator_version: string; completed_at: string; summary: { mandatory_total: number; mandatory_covered: number; finding_count: number; generated_items_total?: number; generated_items_traceable?: number; mandatory_items_total?: number; mandatory_items_traceable?: number }; jev_decisions?: { status: string }; decision?: { status: string; jev_version: string }; plan_context?: Pick<Run, "id" | "employee_id" | "employee_profile_id" | "created_by"> | null; findings?: Finding[]; review_actions?: Array<{ id: string; action: string; reason: string; actor_profile_id: string; created_at: string }>; review_actions_has_more?: boolean };
 export class ProductError extends Error { constructor(public status: number, public code: string, public generationRetrySafe = false) { super(code); } }
 export const needsSignIn = (error: unknown) => error instanceof ProductError && error.status === 401;
 export async function productRequest<T>(path: string, init?: RequestInit): Promise<T> {
@@ -42,6 +42,14 @@ export function generationMessage(code: string | null) {
     PROVIDER_PAYMENT_REQUIRED: "The GenAI provider account has insufficient credits (HTTP 402). Top up the account or switch AI_PROVIDER. No onboarding plan was created.",
   };
   return messages[code ?? ""] ?? "Generation did not produce an accepted plan. The attempt is retained in the history below.";
+}
+/** Source traceability (SRS Step 30) from recorded validator counts; null for results recorded before it existed. */
+export function traceabilityLabel(summary: Validation["summary"]) {
+  const { generated_items_total: total, generated_items_traceable: traced, mandatory_items_total: mTotal, mandatory_items_traceable: mTraced } = summary;
+  if (total == null || traced == null) return null;
+  if (total === 0) return "No generated items to trace";
+  const pct = (a: number, b: number) => `${Math.floor((a / b) * 1000) / 10}%`;
+  return `${pct(traced, total)} (${traced} of ${total} items)` + (mTotal ? ` · mandatory ${pct(mTraced ?? 0, mTotal)}` : "");
 }
 export function canReviewRun(me: Me, run: Pick<Run, "created_by" | "employee_profile_id">) {
   return me.roles.some((r) => r === "ADMIN" || r === "REVIEWER") && me.id !== run.created_by && me.id !== run.employee_profile_id;

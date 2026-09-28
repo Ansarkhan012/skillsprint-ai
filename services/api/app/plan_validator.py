@@ -32,6 +32,7 @@ EXPLANATIONS = {
     "STALE_INPUT": "Current authoritative context differs from the pinned generation input.",
     "STRUCTURAL_REFERENCE_INVALID": "The plan or its reference structure fails the pinned structural contract.",
 }
+TRACEABILITY_CODES = frozenset({"UNSUPPORTED_REQUIREMENT", "SOURCE_SUPPORT_MISSING", "SOURCE_REFERENCE_INVALID"})
 CHILDREN = ("learning_objectives", "key_concepts", "activities", "checklist_items", "tasks",
             "scenarios", "quizzes", "assessments", "completion_criteria")
 
@@ -62,6 +63,9 @@ def validate_plan(content: dict, snapshot: GenerationInputSnapshot, run_id,
     requirements = {req.revision_id: req for req in snapshot.requirements}
     mandatory = {key for key, req in requirements.items() if req.mandatory}
     findings = []
+    # Traceability (SRS Step 30): generated items whose every source reference is an
+    # approved evidence chunk/locator of each requirement they cite. [all, mandatory]
+    items_total, items_traceable = [0, 0], [0, 0]
 
     def add(code, location, req=None, severity="ERROR"):
         if len(findings) >= 1999:
@@ -75,7 +79,9 @@ def validate_plan(content: dict, snapshot: GenerationInputSnapshot, run_id,
 
     def result(valid, covered):
         return ValidationEvidence(mandatory_total=len(mandatory), mandatory_covered=len(covered & mandatory),
-            structurally_valid=valid, current_input=current_input, findings=tuple(findings))
+            structurally_valid=valid, current_input=current_input, findings=tuple(findings),
+            generated_items_total=items_total[0], generated_items_traceable=items_traceable[0],
+            mandatory_items_total=items_total[1], mandatory_items_traceable=items_traceable[1])
 
     if not current_input:
         add("OUTDATED_SOURCE" if stale_source else "STALE_INPUT", "input", severity="REVIEW")
@@ -138,6 +144,7 @@ def validate_plan(content: dict, snapshot: GenerationInputSnapshot, run_id,
                                      for ri, row in enumerate(node.rubric))
             grounded_module = True
             for node_path, node in nodes:
+                first_finding = len(findings)
                 ids = set(node.requirement_ids)
                 if len(ids) != len(node.requirement_ids):
                     add("DUPLICATE_REQUIREMENT", node_path)
@@ -158,6 +165,10 @@ def validate_plan(content: dict, snapshot: GenerationInputSnapshot, run_id,
                 if any((r.document_version_id, r.chunk_id, r.locator) not in allowed for r in node.source_refs):
                     add("SOURCE_REFERENCE_INVALID", node_path)
                     grounded_module = False
+                traceable = not any(item.code in TRACEABILITY_CODES for item in findings[first_finding:])
+                for index in ((0, 1) if module.mandatory else (0,)):
+                    items_total[index] += 1
+                    items_traceable[index] += traceable
                 if hasattr(node, "due_stage_id") and node.due_stage_id not in stage_map:
                     add("STRUCTURAL_REFERENCE_INVALID", node_path)
                 elif hasattr(node, "due_stage_id"):

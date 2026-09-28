@@ -44,6 +44,11 @@ class ValidationEvidence(BaseModel):
     structurally_valid: bool
     current_input: bool
     findings: tuple[Finding, ...] = Field(max_length=2000)
+    # Traceability counts; 0/0 when the plan could not be parsed. Score = traceable/total.
+    generated_items_total: int = Field(default=0, ge=0)
+    generated_items_traceable: int = Field(default=0, ge=0)
+    mandatory_items_total: int = Field(default=0, ge=0)
+    mandatory_items_traceable: int = Field(default=0, ge=0)
 
 
 class JEVDecision(BaseModel):
