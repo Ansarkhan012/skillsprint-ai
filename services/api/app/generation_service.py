@@ -547,6 +547,8 @@ async def generate_unverified(
     call_deadline = getattr(getattr(provider, "config", None), "timeout_seconds", 0) or 0
 
     def budget_allows(extra_delay: float = 0.0) -> bool:
+        if getattr(getattr(provider, "config", None), "provider", None) == "deepseek" and calls >= 2:
+            return False  # one shared retry budget for transient and structural failures
         allowed = perf_counter() - run_started + extra_delay + call_deadline <= RUN_BUDGET_SECONDS
         if not allowed:
             _LOG.warning("generation_run_budget_exhausted request_id=%s elapsed_s=%.1f call_deadline_s=%.0f",

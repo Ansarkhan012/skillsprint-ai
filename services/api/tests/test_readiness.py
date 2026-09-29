@@ -40,7 +40,7 @@ V401_HASH = "83c231d9c9647da559d57e6ece4680ef8f8902c6e38c1e484ae59888eb91b00a"
 V410_HASH = "f4edf5d50196fe8d4635a95cef1164bbd85215f31f90f58aa08390fed8c6d5fa"
 V411_HASH = "aba61f714140480ebcaee45f0d779c78f7165b51e487aecc902a97babd727d15"
 # The live contract; bump here when the current version changes.
-CURRENT, CURRENT_HASH = "phase4d-content-only/4.1.1", V411_HASH
+CURRENT, CURRENT_HASH = "phase4d-content-only/4.1.2", "c0402bdf188c55d1f467dcb01b94891d75955a442152af80f60e84a929d46180"
 READY = "READY_FOR_ONE_CONTROLLED_LIVE_GENERATION"
 CANARY = "CANARY_POLICY_TEXT_do_not_log"
 
@@ -104,7 +104,7 @@ def test_hashes_all_versions_are_distinct_and_historical_ones_unchanged():
     assert content_template_hash(CONTENT_V401) == V401_HASH
     assert content_template_hash(CONTENT_V410) == V410_HASH
     assert content_template_hash(CURRENT) == CURRENT_HASH
-    assert CURRENT_CONTENT_VERSION == CURRENT == "phase4d-content-only/4.1.1"
+    assert CURRENT_CONTENT_VERSION == CURRENT == "phase4d-content-only/4.1.2"
 
 
 # --- 7. structure the model cannot control -------------------------------------------------------
@@ -310,8 +310,8 @@ def test_structural_retry_is_reachable_only_within_the_budget_window(monkeypatch
 # --- 5/6. readiness gate -----------------------------------------------------------------------------
 
 def db_result(tmp_path, **overrides):
-    data = {"checked_prompt_version": CURRENT, "checked_template_hash": CURRENT_HASH, "checked_provider": "nararouter",
-            "checked_model": "agnes-2.5-flash", "pair_accepted": True, "model_accepted": True,
+    data = {"checked_prompt_version": CURRENT, "checked_template_hash": CURRENT_HASH, "checked_provider": "deepseek",
+            "checked_model": "deepseek-flash", "provider_accepted": True, "pair_accepted": True, "model_accepted": True,
             "max_timeout_seconds": 290, "max_output_tokens_upper": 65536, "projection_constraint_present": True,
             "diagnostics_table_present": True, "diagnostics_rpc_present": True,
             "diagnostics_rpc_executable": True, "postgrest_schema_reload_trigger_present": True, **overrides}
@@ -327,11 +327,13 @@ def backend_env(tmp_path, monkeypatch):
     directory = tmp_path / "backend"
     directory.mkdir()
     (directory / ".env").write_text("\n".join([
-        "AI_PROVIDER=nararouter", "NARAROUTER_API_KEY=placeholder-not-a-secret",
+        "AI_PROVIDER=deepseek", "DEEPSEEK_API_KEY=placeholder-not-a-secret", "DEEPSEEK_MODEL=deepseek-flash",
+        "DEEPSEEK_TIMEOUT_SECONDS=290",
+        "NARAROUTER_API_KEY=placeholder-not-a-secret",
         "NARAROUTER_BASE_URL=https://nararouter.invalid/v1", "NARAROUTER_MODEL=agnes-2.5-flash",
         "NARAROUTER_TIMEOUT_SECONDS=290", "NARAROUTER_MAX_OUTPUT_TOKENS=32768", "NARAROUTER_TEMPERATURE=0.1",
         "GENERATION_SOURCE_KEYS=true", "GENERATION_CONTENT_ONLY=true", ""]), encoding="utf-8")
-    for name in ("AI_PROVIDER", "NARAROUTER_API_KEY", "NARAROUTER_BASE_URL", "NARAROUTER_MODEL",
+    for name in ("AI_PROVIDER", "DEEPSEEK_API_KEY", "DEEPSEEK_MODEL", "NARAROUTER_API_KEY", "NARAROUTER_BASE_URL", "NARAROUTER_MODEL",
                  "NARAROUTER_TIMEOUT_SECONDS", "NARAROUTER_MAX_OUTPUT_TOKENS", "NARAROUTER_TEMPERATURE",
                  "NARAROUTER_REASONING_EFFORT", "NARAROUTER_CONTENT_REASONING_EFFORT",
                  "GENERATION_CONTENT_ONLY", "GENERATION_SOURCE_KEYS"):
@@ -371,7 +373,7 @@ def test_gate_passes_the_real_snapshot_with_db_verification(backend_env, tmp_pat
 def test_gate_requires_db_verification_and_never_assumes_it(backend_env, no_network):
     result = gate.run_gate(EMPLOYEE, str(SNAPSHOT_FILE), backend_dir=str(backend_env))
     assert result.status == "DB_VERIFICATION_REQUIRED" and result.final_line == "DB_VERIFICATION_REQUIRED"
-    assert CURRENT_HASH in result.db_sql and "generation_runs_content_v411_projection_check" in result.db_sql
+    assert CURRENT_HASH in result.db_sql and "generation_runs_content_v412_projection_check" in result.db_sql
     assert "pg_get_functiondef" in result.db_sql and not re.search(r"(?i)\b(insert|update|delete|alter)\b",
                                                                     result.db_sql)
 
@@ -408,10 +410,10 @@ def test_gate_blocks_wrong_employee_missing_config_and_bad_fixture(backend_env, 
     mismatched = gate.run_gate(EMPLOYEE, str(SNAPSHOT_FILE), fixture=str(fixture), backend_dir=str(backend_env))
     assert mismatched.final_line.startswith("BLOCKED: F. fixture")
     env = backend_env / ".env"
-    env.write_text(env.read_text(encoding="utf-8").replace("NARAROUTER_API_KEY=placeholder-not-a-secret\n", ""),
+    env.write_text(env.read_text(encoding="utf-8").replace("DEEPSEEK_API_KEY=placeholder-not-a-secret\n", ""),
                    encoding="utf-8")
     missing = gate.run_gate(EMPLOYEE, str(SNAPSHOT_FILE), backend_dir=str(backend_env))
-    assert missing.final_line.startswith("BLOCKED: A. runtime configuration") and "NARAROUTER_API_KEY" in missing.final_line
+    assert missing.final_line.startswith("BLOCKED: A. runtime configuration") and "DEEPSEEK_API_KEY" in missing.final_line
 
 
 def test_gate_without_snapshot_needs_an_operator_token(backend_env, no_network, monkeypatch):

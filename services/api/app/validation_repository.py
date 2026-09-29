@@ -1,11 +1,41 @@
 """Caller-JWT reads; only backend finalization uses the existing trusted credential."""
 import asyncio
+import logging
+import re
+
 import httpx
 from fastapi import HTTPException, Request
 
 from .config import get_settings
 from .generation_repository import GenerationRepository
 from .rrm_repository import RRMRepository
+
+
+_LOG = logging.getLogger(__name__)
+# record_python_validation raises these exact codes (202609260002/202609280002). Statuses are
+# unchanged (409 conflicts, 403 forbidden); only the code now says which guard rejected.
+_PERSISTENCE_REJECTIONS = {
+    "VAL5_STALE_INPUT": (409, "VALIDATION_STALE_INPUT"),
+    "VAL5_INVALID_INPUT": (409, "VALIDATION_RESULT_REJECTED"),
+    "VAL5_IDEMPOTENCY_CONFLICT": (409, "VALIDATION_IDEMPOTENCY_CONFLICT"),
+    "VAL5_FORBIDDEN": (403, "VALIDATION_FORBIDDEN"),
+}
+_SAFE_UPSTREAM = re.compile(r"(PGRST[0-9]{3}|[0-9A-Z]{5}|VAL5_[A-Z_]{1,40})")
+
+
+def _safe_upstream_code(body) -> str:
+    if isinstance(body, dict):
+        for value in (body.get("message"), body.get("code")):
+            if isinstance(value, str) and _SAFE_UPSTREAM.fullmatch(value):
+                return value
+    return "REDACTED"
+
+
+def _persistence_rejection(status: int, body) -> tuple[int, str | None]:
+    message = body.get("message") if isinstance(body, dict) else None
+    if isinstance(message, str) and message in _PERSISTENCE_REJECTIONS:
+        return _PERSISTENCE_REJECTIONS[message]
+    return status, None
 
 
 class ValidationRepository(GenerationRepository):
@@ -50,6 +80,17 @@ class ValidationRepository(GenerationRepository):
         except httpx.HTTPError:
             raise HTTPException(503, "VALIDATION_DATA_UNAVAILABLE") from None
         if not response.is_success:
+            if name == "record_python_validation":
+                try:
+                    body = response.json()
+                except ValueError:
+                    body = None
+                # The database's own reason, as an allowlisted code (never the raw body).
+                status, code = _persistence_rejection(response.status_code, body)
+                _LOG.warning("validation_persistence_rejected upstream_status=%d upstream_code=%s api_code=%s",
+                             response.status_code, _safe_upstream_code(body), code)
+                if code is not None:
+                    raise HTTPException(status, code)
             # Never forward raw SQL/provider messages or response bodies.
             if response.status_code in (401, 403):
                 raise HTTPException(403, "VALIDATION_FORBIDDEN")

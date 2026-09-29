@@ -44,7 +44,8 @@ npm install
 
    | `AI_PROVIDER` | Required variables | Notes |
    |---|---|---|
-   | `nararouter` (default) | `NARAROUTER_API_KEY`, `NARAROUTER_BASE_URL`, `NARAROUTER_MODEL=agnes-2.5-flash` | Free-plan model. Requires migrations up to `202609280005`. Use `NARAROUTER_MAX_OUTPUT_TOKENS=32768` (a full plan can exceed 16,384 tokens), `NARAROUTER_TIMEOUT_SECONDS=290`. See the model notes below |
+   | `deepseek` (controlled demo) | `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL=deepseek-flash`, `GENERATION_CONTENT_ONLY=true` | Official Responses API; 4.1.2 refuses any other provider/model before reservation. |
+   | `nararouter` (historical) | `NARAROUTER_API_KEY`, `NARAROUTER_BASE_URL`, `NARAROUTER_MODEL=agnes-2.5-flash` | Free-plan model. Requires migrations up to `202609280005`. Use `NARAROUTER_MAX_OUTPUT_TOKENS=32768` (a full plan can exceed 16,384 tokens), `NARAROUTER_TIMEOUT_SECONDS=290`. See the model notes below |
    | `gemini` | `GEMINI_API_KEY`, `GEMINI_MODEL` | The Gemini free tier allows only about 20 requests/day per model |
    | `groq` | `GROQ_API_KEY` (`GROQ_MODEL=openai/gpt-oss-20b`) | Free-tier tokens-per-minute limits can reject full plans (HTTP 413) |
 
@@ -101,7 +102,7 @@ Bootstrap:
 Start the API from the **repository root**. `.env` is read from the working directory; starting elsewhere causes `GENERATION_PROVIDER_NOT_CONFIGURED`.
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir services\api --reload
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-demo-backend.ps1
 ```
 
 In a second terminal:
@@ -112,6 +113,8 @@ npm run dev
 ```
 
 Open `http://localhost:3000/login`. API health: `http://127.0.0.1:8000/api/v1/health`.
+
+Before generation, GET `http://127.0.0.1:8000/api/v1/generation-config`: it must report `deepseek`, `deepseek-flash`, `content-only`, `phase4d-content-only/4.1.2`. A 503 or 404 means stop. In the signed-in UI, GET `/api/document-gateway/generation-config` to verify the frontend proxy reaches that configuration. Neither check calls a provider. See [runtime configuration investigation](docs/GENERATION_RUNTIME_CONFIG.md).
 
 ## 6. Test
 

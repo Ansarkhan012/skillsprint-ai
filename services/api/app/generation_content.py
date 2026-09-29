@@ -23,15 +23,16 @@ from .rrm_rules import canonical_json
 CONTENT_V400 = "phase4d-content-only/4.0.0"   # historical; reproducible, never live-selected
 CONTENT_V401 = "phase4d-content-only/4.0.1"   # historical; reproducible, never live-selected
 CONTENT_V410 = "phase4d-content-only/4.1.0"   # historical; demo-minimal contract, schema only in response_format
-# Current: the 4.1.0 content contract unchanged, with the exact response schema also in the prompt text
+# Historical 4.1.1: the 4.1.0 contract, with the exact response schema also in the prompt text
 # (NaraRouter does not document response_format enforcement).
 CONTENT_V411 = "phase4d-content-only/4.1.1"
-CURRENT_CONTENT_VERSION = CONTENT_V411
-CONTENT_PROMPT_VERSIONS = frozenset({CONTENT_V400, CONTENT_V401, CONTENT_V410, CONTENT_V411})
-MINIMAL_CONTENT_VERSIONS = frozenset({CONTENT_V410, CONTENT_V411})  # share RequirementContentV410
+CONTENT_V412 = "phase4d-content-only/4.1.2"
+CURRENT_CONTENT_VERSION = CONTENT_V412
+CONTENT_PROMPT_VERSIONS = frozenset({CONTENT_V400, CONTENT_V401, CONTENT_V410, CONTENT_V411, CONTENT_V412})
+MINIMAL_CONTENT_VERSIONS = frozenset({CONTENT_V410, CONTENT_V411, CONTENT_V412})  # seven-field content shape; 4.1.2 adds quality floors
 CONTENT_PROJECTION_VERSION = "generation-content/4.0.0"  # 4.0.0 and 4.0.1 projection
 CONTENT_PROJECTION_VERSIONS = {CONTENT_V400: CONTENT_PROJECTION_VERSION, CONTENT_V401: CONTENT_PROJECTION_VERSION,
-                               CONTENT_V410: "generation-content/4.1.0", CONTENT_V411: "generation-content/4.1.1"}
+                               CONTENT_V410: "generation-content/4.1.0", CONTENT_V411: "generation-content/4.1.1", CONTENT_V412: "generation-content/4.1.2"}
 # 4.1.0: fields the model no longer writes are filled by Python from trusted requirement data.
 DEFAULT_MODULE_MINUTES = 30  # backend default estimate; not a policy fact
 OUTPUT_SCHEMA_VERSION = "onboarding-plan/1.0.0"
@@ -149,10 +150,30 @@ class ContentResponseV410(BaseModel):
     requirements: dict[str, RequirementContentV410]
 
 
+def _quality_text(minimum: int, maximum: int):
+    return Annotated[str, Field(min_length=minimum, max_length=maximum, pattern=r"\S")]
+
+
+class RequirementContentV412(RequirementContentV410):
+    """Meaningful content floors; historical maxima and distinct-option rule retained."""
+    module_title: _quality_text(5, 120)
+    objective: _quality_text(20, 400)
+    task: _quality_text(20, 400)
+    checklist: _quality_text(10, 240)
+    quiz_question: _quality_text(15, 400)
+    quiz_options: tuple[_quality_text(2, 160), ...] = Field(
+        min_length=3, max_length=3, json_schema_extra={"uniqueItems": True})
+
+
+class ContentResponseV412(ContentResponseV410):
+    plan_title: _quality_text(8, 120)
+    requirements: dict[str, RequirementContentV412]
+
+
 CONTENT_ITEM_MODELS = {CONTENT_V400: RequirementContentV400, CONTENT_V401: RequirementContent,
-                       CONTENT_V410: RequirementContentV410, CONTENT_V411: RequirementContentV410}
+                       CONTENT_V410: RequirementContentV410, CONTENT_V411: RequirementContentV410, CONTENT_V412: RequirementContentV412}
 CONTENT_RESPONSE_MODELS = {CONTENT_V400: ContentResponseV400, CONTENT_V401: ContentResponse,
-                           CONTENT_V410: ContentResponseV410, CONTENT_V411: ContentResponseV410}
+                           CONTENT_V410: ContentResponseV410, CONTENT_V411: ContentResponseV410, CONTENT_V412: ContentResponseV412}
 
 
 def _module_text(item, req) -> dict:

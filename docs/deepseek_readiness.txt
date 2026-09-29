@@ -1,0 +1,113 @@
+
+A. Runtime configuration (same settings classes as the backend)
+  .env used: D:\SkillSprint-AI\.env
+  GENERATION_CONTENT_ONLY: True  [process environment]
+  GENERATION_SOURCE_KEYS: True  [.env]
+  selected prompt version: phase4d-content-only/4.1.2
+  AI_PROVIDER: deepseek  [process environment]
+  model: deepseek-flash  [default]
+  timeout_seconds: 120.0  [default]
+  max_output_tokens: 8192  [default]
+  temperature: 0.1  [default]
+  api key: set (value not shown)
+  retry policy: at most 2 total calls; one shared transient/structural retry; 295 s run budget
+  GENERATION_MAX_OBJECTIVES_PER_MODULE: 1  [.env]
+  GENERATION_MAX_TASKS_PER_MODULE: 1  [.env]
+  GENERATION_MAX_CHECKLIST_PER_MODULE: 1  [.env]
+  GENERATION_MAX_QUIZ_PER_MODULE: 1  [.env]
+  GENERATION_MAX_KEY_CONCEPTS_PER_MODULE: 0  [.env]
+  GENERATION_MAX_ACTIVITIES_PER_MODULE: 0  [.env]
+  GENERATION_MAX_SCENARIOS_PER_MODULE: 0  [.env]
+  GENERATION_MAX_ASSESSMENTS_PER_MODULE: 0  [.env]
+  GENERATION_MAX_COMPLETION_CRITERIA_PER_MODULE: 0  [.env]
+  GENERATION_MAX_RUBRIC_ROWS: None  [default]
+  GENERATION_MAX_TEXT_LENGTH: 200  [.env]
+  local diagnostics file: D:\SkillSprint-AI\logs\generation_diagnostics.jsonl (content-free JSON lines, written for every failed attempt)
+  structural retry window: 175.0 s (a format retry needs the first call to finish within this time)
+
+B. Snapshot integrity (no provider call)
+  source: snapshot file snapshot_aa02c897.json
+  employee: aa02c897-14d8-4c3c-994a-c707550677ad (role PHASE4D_ENGINEER, BEGINNER)
+  matrix: 388e2c11-05f2-4ed2-babf-8c3303bcbea5 revision 1 edit 1 lock 3
+  stage set: STANDARD_EMPLOYEE_ONBOARDING v1 (ACTIVE), 5 stages
+  requirements: 6 (6 mandatory)
+  dependencies: 8 (acyclic, stage order valid)
+  evidence: 25 references, 10 distinct chunks/locators
+  frozen input hash: adfeb9fc0bfff2bf666a0a766ac94535bdc3e855b7b330f3dfebd158df6447f9
+  input hash check: matches expected
+
+C. Prompt / version identity
+  prompt version: phase4d-content-only/4.1.2
+  template hash: c0402bdf188c55d1f467dcb01b94891d75955a442152af80f60e84a929d46180
+  schema version: onboarding-plan/1.0.0
+  projection hash: 64398549c33a9c9fc0fca36e7d7575b78cd9f507b645dc46551620fbbd0930fb
+  reservation == execution: same version, template hash and projection hash
+  provider schema == Pydantic model: identical (fields, required, bounds, additionalProperties)
+  model-generated mechanical fields: none (no ids, stages, requirement mappings, sources, dependencies, identity, request id, mandatory/priority)
+
+D. Database contract (read-only)
+  status: DB_VERIFICATION_REQUIRED (no --db-verification result supplied; not assumed)
+
+E. Exact provider request (built, never sent)
+  system prompt bytes: 1423
+  user/context bytes: 3140
+  response schema bytes: 1392
+  request bytes (adapter size guard): 6352 / 24576
+  total serialized request bytes: 6352
+  approx input tokens (bytes/4): 1588
+  schema properties / object depth: 15 / 3
+  max output tokens: 8192
+  reasoning effort sent: none
+  vs 4.0.1 request bytes: 6352 vs 9088 (30% smaller)
+
+F. Adversarial model outputs (expected safe failures)
+  missing requirement key: SCHEMA_INVALID @ requirement_keys: requirements.R6 missing_requirement_content (1 error(s); persisted diagnostic content-free)
+  only one requirement entry: SCHEMA_INVALID @ requirement_keys: requirements.R1 missing_requirement_content (5 error(s); persisted diagnostic content-free)
+  duplicate requirement key: MALFORMED_JSON @ content_json:  duplicate_key_or_constant (1 error(s); persisted diagnostic content-free)
+  unknown R#: SCHEMA_INVALID @ requirement_keys: requirements.unknown_field unknown_requirement_key (1 error(s); persisted diagnostic content-free)
+  missing objective: SCHEMA_INVALID @ content_model: requirements.R5.objective missing (1 error(s); persisted diagnostic content-free)
+  empty string: SCHEMA_INVALID @ content_model: requirements.R5.task string_too_short (1 error(s); persisted diagnostic content-free)
+  blank title: SCHEMA_INVALID @ content_model: requirements.R5.module_title string_too_short (1 error(s); persisted diagnostic content-free)
+  text too long: SCHEMA_INVALID @ content_model: requirements.R5.module_title string_too_long (1 error(s); persisted diagnostic content-free)
+  wrong type: SCHEMA_INVALID @ content_model: requirements.R5.checklist string_type (1 error(s); persisted diagnostic content-free)
+  null field: SCHEMA_INVALID @ content_model: requirements.R5.quiz_question string_type (1 error(s); persisted diagnostic content-free)
+  quiz with 2 options: SCHEMA_INVALID @ content_model: requirements.R5.quiz_options.1 string_too_short (2 error(s); persisted diagnostic content-free)
+  quiz with 4 options: SCHEMA_INVALID @ content_model: requirements.R5.quiz_options.1 string_too_short (4 error(s); persisted diagnostic content-free)
+  duplicate quiz options: SCHEMA_INVALID @ content_model: requirements.R5 value_error (1 error(s); persisted diagnostic content-free)
+  invalid correct index: SCHEMA_INVALID @ content_model: requirements.R5.correct_option_index less_than_equal (1 error(s); persisted diagnostic content-free)
+  index as string: SCHEMA_INVALID @ content_model: requirements.R5.correct_option_index int_type (1 error(s); persisted diagnostic content-free)
+  extra field (model-supplied id): SCHEMA_INVALID @ content_model: requirements.R5.module_id extra_forbidden (1 error(s); persisted diagnostic content-free)
+  removed 4.0.1 field returned: SCHEMA_INVALID @ content_model: requirements.R5.quiz_explanation extra_forbidden (1 error(s); persisted diagnostic content-free)
+  model-supplied stage structure: SCHEMA_INVALID @ content_model: stages extra_forbidden (1 error(s); persisted diagnostic content-free)
+  requirements as a list: SCHEMA_INVALID @ content_model: requirements dict_type (1 error(s); persisted diagnostic content-free)
+  wrapper object: SCHEMA_INVALID @ content_model: unknown_field extra_forbidden (3 error(s); persisted diagnostic content-free)
+  markdown-wrapped JSON: MALFORMED_JSON @ content_json:  invalid_json (1 error(s); persisted diagnostic content-free)
+  malformed JSON: MALFORMED_JSON @ content_json:  invalid_json (1 error(s); persisted diagnostic content-free)
+  one-character values; distinct options=False: SCHEMA_INVALID @ content_model: plan_title string_too_short (55 error(s); persisted diagnostic content-free)
+  one-character values; distinct options=True: SCHEMA_INVALID @ content_model: plan_title string_too_short (55 error(s); persisted diagnostic content-free)
+
+G. Full zero-provider pipeline
+  content schema -> assembly -> OnboardingPlan -> identity/stage/reference checks: passed
+  stages: 5 frozen stages kept; empty (no requirements): Orientation
+  modules: 6
+  finding: TIMING_UNRESOLVED WARNING input.timing P4D_WORKSTATION_SANDBOX
+  finding: TIMING_UNRESOLVED WARNING input.timing P4D_SECURE_CODING
+  finding: TIMING_UNRESOLVED WARNING input.timing P4D_REPO_WORKFLOW
+  finding: TIMING_UNRESOLVED WARNING input.timing P4D_SECURITY_AWARENESS
+  finding: TIMING_UNRESOLVED WARNING input.timing P4D_POLICY_ACK
+  finding: TIMING_UNRESOLVED WARNING input.timing P4D_FINAL_ASSESSMENT
+  mandatory coverage: 6/6
+  traceability: 30/30
+  validator / JEV: VERIFIED_WITH_WARNING (JEV-006); only input-level warnings
+  expected response size (fixture): 3241 bytes (~810 tokens)
+
+H. Persistence dry-run (nothing written)
+  run / request id: d0a9090e-acd1-5dad-878d-d3c52309e476 (dry-run id; never reserved)
+  employee id: aa02c897-14d8-4c3c-994a-c707550677ad
+  schema version: onboarding-plan/1.0.0
+  content hash: 59ec5971d2ffdd2b6baedcfe18f73463e2d784fe8fd6924407e58f7f6d07a2a9
+  plan size: 41882 bytes (limit 4194304)
+  input hash / projection hash: adfeb9fc0bfff2bf666a0a766ac94535bdc3e855b7b330f3dfebd158df6447f9 / 64398549c33a9c9fc0fca36e7d7575b78cd9f507b645dc46551620fbbd0930fb
+  status transition: QUEUED -> claim -> RUNNING -> finish(postflight hash = input hash, plan, content hash, no error) -> UNVERIFIED
+
+DB_VERIFICATION_REQUIRED

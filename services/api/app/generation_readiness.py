@@ -36,7 +36,7 @@ import httpx
 from dotenv import dotenv_values
 
 from .generation_content import (CONTENT_PROMPT_VERSIONS, CONTENT_RESPONSE_MODELS, CONTENT_V400, CONTENT_V401,
-                                 CONTENT_V410, CONTENT_V411, CURRENT_CONTENT_VERSION, MINIMAL_CONTENT_VERSIONS,
+                                 CONTENT_V410, CONTENT_V411, CONTENT_V412, CURRENT_CONTENT_VERSION, MINIMAL_CONTENT_VERSIONS,
                                  module_layout, requirement_keys, source_refs)
 from .generation_context import input_hash
 from .generation_models import GenerationInputSnapshot, PreflightResult
@@ -47,7 +47,9 @@ from .generation_prompt import (MAX_PROVIDER_REQUEST_BYTES, SCHEMA_VERSION, Gene
 from .generation_provider import (GeminiEnvironment, GroqEnvironment, ProviderFailure, ProviderResult,
                                   groq_request_payload, json_schema_response_format)
 from .generation_service import assemble_content, generate_unverified, structural_retry_window
+from .generation_runtime import resolve_provider_config, validate_generation_target
 from .jev import decide
+from .deepseek_provider import DeepSeekEnvironment, deepseek_request_payload
 from .nararouter_provider import NaraRouterEnvironment, nararouter_request_payload
 from .plan_validator import has_cycle, validate_plan
 from .rrm_models import EmployeeContext
@@ -57,7 +59,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "phase4d_v410_model_content_response.json"
 # Deterministic dry-run request id; never reserved in the database.
 DRY_RUN_ID = uuid5(NAMESPACE_URL, "skillsprint-ai/generation-readiness/dry-run")
-PROJECTION_CONSTRAINTS = {CONTENT_V411: "generation_runs_content_v411_projection_check",
+PROJECTION_CONSTRAINTS = {CONTENT_V412: "generation_runs_content_v412_projection_check",
+                         CONTENT_V411: "generation_runs_content_v411_projection_check",
                           CONTENT_V410: "generation_runs_content_v410_projection_check",
                           CONTENT_V400: "generation_runs_content_v4_projection_check",
                           CONTENT_V401: "generation_runs_content_v401_projection_check"}
@@ -117,15 +120,9 @@ def _source(name: str, env_file: dict) -> str:
 
 def _provider_config(provider: str):
     try:
-        if provider == "nararouter":
-            return NaraRouterEnvironment().adapter_config()
-        if provider == "groq":
-            return GroqEnvironment().adapter_config()
-        if provider == "gemini":
-            return GeminiEnvironment().adapter_config()
-    except (ProviderFailure, ValueError):
+        return resolve_provider_config(provider)
+    except ProviderFailure:
         return None
-    return None
 
 
 def check_configuration(report: _Report, backend_dir: Path) -> dict:
@@ -147,13 +144,13 @@ def check_configuration(report: _Report, backend_dir: Path) -> dict:
     report.item("AI_PROVIDER", f"{provider}  [{_source('AI_PROVIDER', env_file)}]")
     config = _provider_config(provider)
     if config is None:
-        prefix = {"nararouter": "NARAROUTER_", "groq": "GROQ_", "gemini": "GEMINI_"}.get(provider, "")
+        prefix = {"deepseek": "DEEPSEEK_", "nararouter": "NARAROUTER_", "groq": "GROQ_", "gemini": "GEMINI_"}.get(provider, "")
         missing = [name for name in (prefix + "API_KEY", prefix + "MODEL", prefix + "BASE_URL")
                    if prefix and name != "GEMINI_BASE_URL" and name != "GROQ_BASE_URL"
                    and not (os.environ.get(name) or env_file.get(name))]
         raise Blocked("A. runtime configuration",
                       f"provider '{provider}' is not fully configured (missing or invalid: {', '.join(missing) or 'values'})")
-    prefix = {"nararouter": "NARAROUTER_", "groq": "GROQ_", "gemini": "GEMINI_"}[provider]
+    prefix = {"deepseek": "DEEPSEEK_", "nararouter": "NARAROUTER_", "groq": "GROQ_", "gemini": "GEMINI_"}[provider]
     report.item("model", f"{config.model}  [{_source(prefix + 'MODEL', env_file)}]")
     report.item("timeout_seconds", f"{config.timeout_seconds}  [{_source(prefix + 'TIMEOUT_SECONDS', env_file)}]")
     report.item("max_output_tokens", f"{config.max_output_tokens}  [{_source(prefix + 'MAX_OUTPUT_TOKENS', env_file)}]")
@@ -164,6 +161,8 @@ def check_configuration(report: _Report, backend_dir: Path) -> dict:
                     f"{config.reasoning_effort}  [{_source('NARAROUTER_REASONING_EFFORT', env_file)}]")
         report.item("reasoning_effort (content-only)",
                     f"{config.content_reasoning_effort}  [{_source('NARAROUTER_CONTENT_REASONING_EFFORT', env_file)}]")
+    if provider == "deepseek":
+        report.item("retry policy", "at most 2 total calls; one shared transient/structural retry; 295 s run budget")
     limits = GenerationLimits()
     for name in GenerationLimits.model_fields:
         report.item(name.upper(), f"{getattr(limits, name)}  [{_source(name.upper(), env_file)}]")
@@ -190,6 +189,10 @@ def check_configuration(report: _Report, backend_dir: Path) -> dict:
                       f"effective prompt version is {version}, intended {CURRENT_CONTENT_VERSION}; set "
                       f"GENERATION_CONTENT_ONLY=true in {env_path} (or the backend's process environment) "
                       f"and restart the backend")
+    try:
+        validate_generation_target(config, version)
+    except ProviderFailure:
+        raise Blocked("A. runtime configuration", "GENERATION_CONFIGURATION_MISMATCH: 4.1.2 requires deepseek/deepseek-flash") from None
     return {"provider": provider, "config": config, "version": version}
 
 
@@ -432,11 +435,18 @@ select json_build_object(
   'checked_template_hash', '{template}',
   'checked_provider', '{provider}',
   'checked_model', '{model}',
+  'provider_accepted', position('''{provider}''' in d) > 0 and exists (
+    select 1 from pg_constraint where conrelid = 'public.generation_runs'::regclass
+    and conname = 'generation_runs_provider_check'
+    and position('''{provider}''' in pg_get_constraintdef(oid)) > 0),
   'pair_accepted', d ~ 'p_prompt_version = ''{version}''\\s+and p_template_hash = ''{template}''',
-  'model_accepted', position('''{model}''' in d) > 0 or '{provider}' = 'gemini',
+  'model_accepted', (position('''{model}''' in d) > 0 or '{provider}' = 'gemini') and exists (
+    select 1 from pg_constraint where conrelid = 'public.generation_runs'::regclass
+    and conname = 'generation_runs_model_check'
+    and (position('''{model}''' in pg_get_constraintdef(oid)) > 0 or '{provider}' = 'gemini')),
   'max_timeout_seconds', (regexp_match(d, 'timeout_seconds''\\)::numeric not between 1 and (\\d+)'))[1]::int,
   'max_output_tokens_upper', (regexp_match(d, 'max_output_tokens''\\)::numeric not between 256 and (\\d+)'))[1]::int,
-  'projection_constraint_present', exists (select 1 from pg_constraint where conname = '{constraint}'),
+  'projection_constraint_present', exists (select 1 from pg_constraint where conrelid = 'public.generation_runs'::regclass and conname = '{constraint}'),
   'diagnostics_table_present', to_regclass('public.generation_attempt_diagnostics') is not null,
   'diagnostics_rpc_present', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                                      where n.nspname = 'public' and p.proname = 'record_generation_attempt_diagnostics'),
@@ -477,6 +487,8 @@ def check_database(report: _Report, db_path: Path | None, version: str, template
         "checked_prompt_version": result.get("checked_prompt_version") == version,
         "checked_template_hash": result.get("checked_template_hash") == template,
         "checked_model": result.get("checked_model") == config.model,
+        **({"checked_provider": result.get("checked_provider") == provider,
+            "provider_accepted": result.get("provider_accepted") is True} if provider == "deepseek" else {}),
         "pair_accepted": result.get("pair_accepted") is True,
         "model_accepted": result.get("model_accepted") is True,
         "timeout bound": isinstance(result.get("max_timeout_seconds"), int)
@@ -511,7 +523,9 @@ def build_prompt_for_comparison(prompt) -> int | None:
 
 
 def _request_bytes(prompt, provider: str, config) -> int:
-    if provider == "nararouter":
+    if provider == "deepseek":
+        full = deepseek_request_payload(prompt, config)
+    elif provider == "nararouter":
         payload = nararouter_request_payload(prompt, config)
         full = {**payload, "response_format": json_schema_response_format(provider_schema_for(prompt))}
     elif provider == "groq":
@@ -530,7 +544,11 @@ def measure_request(report: _Report, prompt, provider: str, config, snapshot=Non
         _COMPARISON["v410_request_bytes"] = _request_bytes(build_prompt(snapshot, DRY_RUN_ID, version=CONTENT_V410),
                                                            provider, config)
     report.section("E. Exact provider request (built, never sent)")
-    if provider == "nararouter":
+    if provider == "deepseek":
+        payload = full = deepseek_request_payload(prompt, config)
+        schema = full["text"]["format"]["schema"]
+        system, user = full["instructions"], prompt.untrusted_data
+    elif provider == "nararouter":
         payload = nararouter_request_payload(prompt, config)
         schema = provider_schema_for(prompt)
         full = {**payload, "response_format": json_schema_response_format(schema)}
@@ -564,7 +582,7 @@ def measure_request(report: _Report, prompt, provider: str, config, snapshot=Non
     report.item("approx input tokens (bytes/4)", total // 4)
     report.item("schema properties / object depth", f"{properties} / {depth}")
     report.item("max output tokens", config.max_output_tokens)
-    report.item("reasoning effort sent", full.get("reasoning_effort", "not sent"))
+    report.item("reasoning effort sent", full.get("reasoning", {}).get("effort", full.get("reasoning_effort", "not sent")))
     if schema_bytes > 8192:
         report.warn(f"response schema is large ({schema_bytes} bytes)")
     if total // 4 > 6000:
@@ -679,7 +697,18 @@ def adversarial_variants(fixture: dict) -> list[tuple[str, str, str]]:
 def check_adversarial(report: _Report, snapshot, fixture: dict, version: str) -> None:
     from .generation_service import StructuralFailure
     report.section("F. Adversarial model outputs (expected safe failures)")
-    for name, text, expected in adversarial_variants(fixture):
+    variants = adversarial_variants(fixture)
+    if version == CONTENT_V412:
+        for distinct in (False, True):
+            data = json.loads(json.dumps(fixture))
+            data["plan_title"] = "x"
+            for item in data["requirements"].values():
+                for name in ("module_title", "objective", "task", "checklist", "quiz_question"):
+                    item[name] = "x"
+                item["quiz_options"] = ["a", "b", "c"] if distinct else ["a", "a", "a"]
+            variants.append(("one-character values; distinct options=" + str(distinct),
+                             json.dumps(data), "SCHEMA_INVALID"))
+    for name, text, expected in variants:
         def attempt():
             try:
                 assemble_content(text, snapshot, DRY_RUN_ID, version)

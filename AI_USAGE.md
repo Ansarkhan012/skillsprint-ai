@@ -323,3 +323,13 @@ Codex inspected the outbound Groq construction and factored repeated output-sche
 | Tests performed | Four focused executable auth tests passed; frontend lint, TypeScript check, and production build passed; backend regression 249 passed with one existing TestClient deprecation warning. Secret-pattern and diff checks performed separately. |
 | Human review status | Login security fix pending review. No real browser login result is claimed; Phase 3A.1 live verification remains paused. No migration edits, commit, push, or deployment. |
 | Verifying team member | Pending human review |
+
+
+## Official DeepSeek controlled integration (4.1.2)
+
+Current controlled generation uses the first-class Official DeepSeek Responses adapter / deepseek-flash with native JSON Schema and thinking disabled. This replaces NaraRouter / agnes-2.5-flash for the next controlled run because of documented structured-output support and direct provider integration. Historical failures and contracts remain preserved. Python remains the trust boundary. See [DeepSeek 4.1.2](docs/DEEPSEEK_V412.md) for schema floors, retry limits, migration and zero-provider readiness commands. Implementation and verification use only mocked/offline generation; no live DeepSeek call was made.
+
+
+## Runtime configuration correction
+
+The earlier DeepSeek readiness invocation used a process-only override while root .env still selected NaraRouter. The actual UI backend was not verified by that CLI run. Root .env now selects DeepSeek durably; the API and readiness share configuration resolution and reject mismatched 4.1.2 targets before reservation. Startup and the read-only generation-config endpoint expose only four safe configuration fields. See [runtime investigation](docs/GENERATION_RUNTIME_CONFIG.md). No live provider call was made for this fix.

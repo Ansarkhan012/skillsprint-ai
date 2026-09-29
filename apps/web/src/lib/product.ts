@@ -22,8 +22,21 @@ export function postProduct<T>(path: string, body: unknown, headers?: Record<str
 export const canAuthor = (me: Me) => me.roles.some((role) => role === "ADMIN" || role === "TRAINING_MANAGER");
 export const canReadGeneration = (me: Me) => me.roles.some((role) => ["ADMIN", "TRAINING_MANAGER", "REVIEWER"].includes(role));
 export function humanize(value: string) { return value.replaceAll("_", " ").toLowerCase().replace(/^./, (s) => s.toUpperCase()); }
+// Independent validation reports why it stopped; a generic "record changed" would hide it.
+const VALIDATION_MESSAGES: Record<string, string> = {
+  VALIDATION_REQUIRES_UNVERIFIED_PLAN: "Only an Unverified plan from a completed generation can be validated. Nothing was saved.",
+  VALIDATION_PROVENANCE_INVALID: "The plan's recorded provenance could not be confirmed, so it was not validated. Nothing was saved.",
+  VALIDATION_CANNOT_COMPLETE: "The Python validator could not evaluate this plan. Nothing was saved.",
+  VALIDATION_STALE_INPUT: "Approved ground truth changed after this plan was generated, so it cannot be validated as current. Nothing was saved.",
+  VALIDATION_RESULT_REJECTED: "The database rejected the validation result as inconsistent. Nothing was saved.",
+  VALIDATION_IDEMPOTENCY_CONFLICT: "A different validation result already exists for this plan. Refresh to view it.",
+  VALIDATION_STATE_CONFLICT: "The validation service rejected this request. Nothing was saved.",
+  VALIDATION_GROUND_TRUTH_UNAVAILABLE: "Approved ground truth is unavailable right now. Nothing was saved; try again shortly.",
+  VALIDATION_PERSISTENCE_NOT_CONFIGURED: "Validation storage is not configured on the backend. Nothing was saved.",
+};
 export function errorMessage(error: unknown): string {
   if (error instanceof ProductError) {
+    if (VALIDATION_MESSAGES[error.code]) return `${VALIDATION_MESSAGES[error.code]} (${error.code})`;
     if (error.status === 401) return "Your session has expired. Sign in again to continue.";
     if (error.status === 403) return "Your account does not have permission for this action or record.";
     if (error.status === 404) return "This record is unavailable or has not been created yet.";

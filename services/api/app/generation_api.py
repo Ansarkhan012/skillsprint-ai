@@ -15,6 +15,9 @@ from .generation_prompt import SCHEMA_VERSION, build_prompt
 from .generation_provider import (GeminiEnvironment, GeminiProvider, GroqEnvironment, GroqProvider,
                                   GenerationProvider, ProviderConfig, ProviderFailure)
 from .generation_service import generate_unverified
+from .generation_runtime import (PROVIDERS, resolve_provider_config, runtime_diagnostic,
+                                 validate_generation_target)
+from .deepseek_provider import DeepSeekEnvironment, DeepSeekProvider
 from .nararouter_provider import NaraRouterEnvironment, NaraRouterProvider
 from .models import AppRole, Principal
 from .rrm_rules import snapshot_hash
@@ -47,19 +50,21 @@ class GenerationPreflightResponse(BaseModel):
 
 def get_provider_bundle(request: Request) -> tuple[GenerationProvider, ProviderConfig]:
     try:
-        selection = GeminiEnvironment().ai_provider
-        if selection == "gemini":
-            config = GeminiEnvironment().adapter_config()
-            return GeminiProvider(request.app.state.supabase_http, config), config
-        if selection == "groq":
-            config = GroqEnvironment().adapter_config()
-            return GroqProvider(request.app.state.supabase_http, config), config
-        if selection == "nararouter":
-            config = NaraRouterEnvironment().adapter_config()
-            return NaraRouterProvider(request.app.state.supabase_http, config), config
-        raise ProviderFailure("PROVIDER_CONFIGURATION_FAILED")
+        config = resolve_provider_config()
+        return PROVIDERS[config.provider](request.app.state.supabase_http, config), config
     except (ProviderFailure, ValueError):
         raise HTTPException(503, "GENERATION_PROVIDER_NOT_CONFIGURED") from None
+
+
+@router.get("/generation-config")
+async def generation_config() -> dict[str, str]:
+    """Read-only serving-process check: no database access and no provider call."""
+    try:
+        return runtime_diagnostic()
+    except ProviderFailure as exc:
+        code = ("GENERATION_CONFIGURATION_MISMATCH" if exc.code == "GENERATION_CONFIGURATION_MISMATCH"
+                else "GENERATION_PROVIDER_NOT_CONFIGURED")
+        raise HTTPException(503, code) from None
 
 
 @router.post("/onboarding-stage-sets/bootstrap", status_code=201)
@@ -109,6 +114,10 @@ async def create_generation(
         raise HTTPException(409, first.blocker_codes[0] if first.blocker_codes else "PREFLIGHT_BLOCKED")
     prompt = build_prompt(first.snapshot)
     provider, config = get_provider_bundle(request)
+    try:
+        validate_generation_target(config, prompt.prompt_version)
+    except ProviderFailure:
+        raise HTTPException(503, "GENERATION_CONFIGURATION_MISMATCH") from None
     if response_state is not None:
         response_state.generation_retry_safe = False
     try:

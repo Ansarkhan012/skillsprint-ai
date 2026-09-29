@@ -210,3 +210,18 @@ test("Release lock is shown to authors, disabled while a run is in progress, hid
   assert.match(running, /queued or running/);
   assert.doesNotMatch(render("MANAGER", ["FAILED"]), /Release lock/);
 });
+
+test("validation errors name their cause; unrelated 409s keep the generic conflict text", () => {
+  const expected = {
+    VALIDATION_RESULT_REJECTED: /rejected the validation result/, VALIDATION_STALE_INPUT: /ground truth changed/,
+    VALIDATION_IDEMPOTENCY_CONFLICT: /already exists/, VALIDATION_REQUIRES_UNVERIFIED_PLAN: /Only an Unverified plan/,
+    VALIDATION_PROVENANCE_INVALID: /provenance/, VALIDATION_STATE_CONFLICT: /validation service rejected/,
+  };
+  for (const [code, pattern] of Object.entries(expected)) {
+    const message = product.errorMessage(new product.ProductError(409, code));
+    assert.match(message, pattern); assert.match(message, new RegExp(`\(${code}\)`));
+    assert.doesNotMatch(message, /The record changed/);
+  }
+  assert.match(product.errorMessage(new product.ProductError(409, "GEN4_IDEMPOTENCY_CONFLICT")), /The record changed/);
+  assert.match(product.errorMessage(new product.ProductError(503, "VALIDATION_GROUND_TRUTH_UNAVAILABLE")), /unavailable/);
+});

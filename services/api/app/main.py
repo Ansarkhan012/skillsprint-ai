@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
+from .generation_runtime import log_runtime_diagnostic
 from .errors import register_error_handlers
 from .models import AppRole, DepartmentCreate, EmployeeCreate, HealthResponse, MeResponse, Principal, RoleCreate
 from .security import current_principal, require_roles
@@ -22,6 +23,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    log_runtime_diagnostic()
     # The pool has no default user Authorization header. Every request supplies its own JWT.
     async with httpx.AsyncClient(limits=httpx.Limits(max_connections=50, max_keepalive_connections=20)) as client:
         application.state.supabase_http = client

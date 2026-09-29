@@ -69,7 +69,8 @@ def embedded(system: str):
 # --- version identity -------------------------------------------------------------------------------
 
 def test_4_1_1_is_current_with_its_own_hash_and_the_unchanged_4_1_0_contract():
-    assert CURRENT_CONTENT_VERSION == CONTENT_V411 == "phase4d-content-only/4.1.1"
+    assert CONTENT_V411 == "phase4d-content-only/4.1.1"
+    assert CURRENT_CONTENT_VERSION != CONTENT_V411  # historical contract remains reproducible
     assert (content_template_hash(CONTENT_V411), content_template_hash(CONTENT_V410)) == (V411_HASH, V410_HASH)
     assert CONTENT_RESPONSE_MODELS[CONTENT_V411] is CONTENT_RESPONSE_MODELS[CONTENT_V410] is ContentResponseV410
     keys = [f"R{i}" for i in range(1, 7)]

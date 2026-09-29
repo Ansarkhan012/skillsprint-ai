@@ -36,7 +36,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 MIGRATIONS = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
 RUN = UUID("aaccc0b5-e109-432e-88ae-805acd35d96a")
 V4_HASH = "d0f338ed27b47e91207d3346fad2b0055f955960b258874804e9b17db8503b43"
-CURRENT, CURRENT_HASH = "phase4d-content-only/4.1.1", "aba61f714140480ebcaee45f0d779c78f7165b51e487aecc902a97babd727d15"
+CURRENT, CURRENT_HASH = "phase4d-content-only/4.1.2", "c0402bdf188c55d1f467dcb01b94891d75955a442152af80f60e84a929d46180"
 UUID_TEXT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
 
@@ -453,10 +453,10 @@ def test_api_reserves_v4_and_persists_an_assembled_plan(monkeypatch):
             keys = [key for key in prompt.response_schema["properties"]["requirements"]["properties"]]
             item = json.loads((FIXTURES / "phase4d_v410_model_content_response.json").read_text(
                 encoding="utf-8"))["requirements"]["R1"]
-            return ProviderResult(text=json.dumps({"plan_title": "Plan", "requirements": {key: item for key in keys}}),
+            return ProviderResult(text=json.dumps({"plan_title": "Onboarding plan", "requirements": {key: item for key in keys}}),
                                   finish_reason="STOP")
     provider = Provider()
-    config = ProviderConfig(model="test-model", api_key=SecretStr("test-only-placeholder"))
+    config = ProviderConfig(provider="deepseek", model="deepseek-flash", api_key=SecretStr("test-only-placeholder"))
     app.dependency_overrides[security.current_principal] = lambda: actor()
     app.dependency_overrides[get_generation_store] = lambda: store
     monkeypatch.setattr(generation_api, "get_provider_bundle", lambda request: (provider, config))
