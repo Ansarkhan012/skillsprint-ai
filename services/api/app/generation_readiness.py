@@ -402,7 +402,10 @@ select json_build_object(
   'model_accepted', position('''{model}''' in d) > 0 or '{provider}' = 'gemini',
   'max_timeout_seconds', (regexp_match(d, 'timeout_seconds''\\)::numeric not between 1 and (\\d+)'))[1]::int,
   'max_output_tokens_upper', (regexp_match(d, 'max_output_tokens''\\)::numeric not between 256 and (\\d+)'))[1]::int,
-  'projection_constraint_present', exists (select 1 from pg_constraint where conname = '{constraint}')
+  'projection_constraint_present', exists (select 1 from pg_constraint where conname = '{constraint}'),
+  'diagnostics_table_present', to_regclass('public.generation_attempt_diagnostics') is not null,
+  'diagnostics_rpc_present', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                                     where n.nspname = 'public' and p.proname = 'record_generation_attempt_diagnostics')
 ) as readiness
 from f;"""
 
@@ -442,6 +445,9 @@ def check_database(report: _Report, db_path: Path | None, version: str, template
         "max_output_tokens bound": isinstance(result.get("max_output_tokens_upper"), int)
                                    and result["max_output_tokens_upper"] >= config.max_output_tokens,
         "projection constraint": result.get("projection_constraint_present") is True,
+        # A failed live call must leave persisted, safe diagnostics (migration 202609280010).
+        "diagnostics table": result.get("diagnostics_table_present") is True,
+        "diagnostics rpc": result.get("diagnostics_rpc_present") is True,
     }
     failed = [name for name, ok in checks.items() if not ok]
     if failed:
@@ -567,6 +573,28 @@ def adversarial_variants(fixture: dict) -> list[tuple[str, str, str]]:
         ("extra property (model-supplied id)", variant(lambda d, k: d["requirements"][k].update(
             module_id=CANARY)), "SCHEMA_INVALID"),
         ("model-supplied stage structure", variant(lambda d, k: d.update(stages=[CANARY])), "SCHEMA_INVALID"),
+        ("requirement missing one field", variant(lambda d, k: d["requirements"][k].pop("quiz_explanation")),
+         "SCHEMA_INVALID"),
+        ("null where string expected", variant(lambda d, k: d["requirements"][k].update(task_description=None)),
+         "SCHEMA_INVALID"),
+        ("null where list expected", variant(lambda d, k: d["requirements"][k].update(quiz_options=None)),
+         "SCHEMA_INVALID"),
+        ("string over max length", variant(lambda d, k: d["requirements"][k].update(module_title=CANARY * 20)),
+         "SCHEMA_INVALID"),
+        ("too many completion criteria", variant(lambda d, k: d["requirements"][k].update(
+            task_completion_criteria=[CANARY] * 21)), "SCHEMA_INVALID"),
+        ("two quiz options", variant(lambda d, k: d["requirements"][k].update(quiz_options=[CANARY, "b"])),
+         "SCHEMA_INVALID"),
+        ("four quiz options", variant(lambda d, k: d["requirements"][k].update(quiz_options=[CANARY, "b", "c", "d"])),
+         "SCHEMA_INVALID"),
+        ("nested quiz object", variant(lambda d, k: d["requirements"][k].update(
+            quiz={"question": CANARY}) or [d["requirements"][k].pop(f) for f in (
+                "quiz_question", "quiz_options", "correct_option_index", "quiz_explanation")]), "SCHEMA_INVALID"),
+        ("requirements as a list", variant(lambda d, k: d.update(requirements=list(d["requirements"].values()))),
+         "SCHEMA_INVALID"),
+        ("wrapper object", json.dumps({"onboarding_plan": json.loads(variant(lambda d, k: None))}), "SCHEMA_INVALID"),
+        ("only one requirement entry", variant(lambda d, k: d.update(requirements={k: d["requirements"][k]})),
+         "SCHEMA_INVALID"),
     ]
 
 
@@ -578,14 +606,21 @@ def check_adversarial(report: _Report, snapshot, fixture: dict, version: str) ->
             try:
                 assemble_content(text, snapshot, DRY_RUN_ID, version)
             except StructuralFailure as exc:
-                return exc.code
+                return exc
             return None
-        code, logs = _captured(attempt)
+        failure, logs = _captured(attempt)
+        code = failure.code if failure else None
         if code != expected:
             raise Blocked("F. adversarial", f"'{name}' produced {code or 'a plan'}, expected {expected}")
-        if any(CANARY.lower() in message.lower() for message in logs):
+        persisted = json.dumps(failure.detail)
+        if any(CANARY.lower() in message.lower() for message in logs) or CANARY.lower() in persisted.lower():
             raise Blocked("F. adversarial", f"'{name}' leaked model text into diagnostics")
-        report.item(name, f"{code} (diagnostics content-free)")
+        detail = failure.detail
+        if detail["layer"] == "unspecified" or not (detail["errors"] or detail.get("received")):
+            raise Blocked("F. adversarial", f"'{name}' produced no actionable persisted diagnostic")
+        first = detail["errors"][0] if detail["errors"] else {}
+        report.item(name, f"{code} @ {detail['layer']}: {first.get('loc', '')} {first.get('type', '')}".rstrip()
+                    + f" ({detail['error_count']} error(s); persisted diagnostic content-free)")
 
 
 def run_pipeline(report: _Report, snapshot, prompt, fixture_text: str, config, version: str) -> dict:

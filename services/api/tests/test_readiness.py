@@ -299,7 +299,7 @@ def db_result(tmp_path, **overrides):
     data = {"checked_prompt_version": CONTENT_V401, "checked_template_hash": V401_HASH, "checked_provider": "nararouter",
             "checked_model": "agnes-2.5-flash", "pair_accepted": True, "model_accepted": True,
             "max_timeout_seconds": 290, "max_output_tokens_upper": 65536, "projection_constraint_present": True,
-            **overrides}
+            "diagnostics_table_present": True, "diagnostics_rpc_present": True, **overrides}
     path = tmp_path / "db.json"
     path.write_text(json.dumps([{"readiness": data}]), encoding="utf-8")
     return path
@@ -363,7 +363,8 @@ def test_gate_requires_db_verification_and_never_assumes_it(backend_env, no_netw
 @pytest.mark.parametrize("override,reason", [
     ({"pair_accepted": False}, "pair_accepted"), ({"projection_constraint_present": False}, "projection constraint"),
     ({"checked_template_hash": V400_HASH}, "checked_template_hash"), ({"max_timeout_seconds": 180}, "timeout bound"),
-    ({"model_accepted": False}, "model_accepted")])
+    ({"model_accepted": False}, "model_accepted"), ({"diagnostics_rpc_present": False}, "diagnostics rpc"),
+    ({"diagnostics_table_present": False}, "diagnostics table")])
 def test_gate_blocks_when_the_database_does_not_accept_the_contract(backend_env, tmp_path, no_network, override, reason):
     result = gate.run_gate(EMPLOYEE, str(SNAPSHOT_FILE), str(db_result(tmp_path, **override)),
                            backend_dir=str(backend_env))

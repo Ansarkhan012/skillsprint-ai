@@ -1,5 +1,6 @@
 """Phase 4C caller-JWT storage boundary. No service-role credential is used."""
 
+import logging
 from uuid import UUID
 
 import httpx
@@ -9,6 +10,8 @@ from .config import get_settings
 from .generation_repository import GenerationRepository
 from .generation_service import AttemptTelemetry
 from .rrm_repository import RRMRepository
+
+_LOG = logging.getLogger(__name__)
 
 
 SAFE_RPC_ERRORS = {
@@ -69,13 +72,21 @@ class GenerationStore(GenerationRepository):
         return await self.rpc(token, "claim_generation_run", {"p_run": str(run_id)}) is True
 
     async def record_attempt(self, token: str, run_id: UUID, item: AttemptTelemetry) -> None:
-        await self.rpc(token, "record_generation_attempt", {
+        attempt_no = await self.rpc(token, "record_generation_attempt", {
             "p_run": str(run_id), "p_type": item.attempt_type,
             "p_outcome": item.provider_outcome, "p_latency": item.latency_ms,
             "p_usage": dict(item.usage), "p_response_hash": item.response_hash,
             "p_response_size": item.response_size, "p_parse": item.parse_outcome,
             "p_error": item.error_code,
         })
+        if item.diagnostics and isinstance(attempt_no, int):
+            # Best effort and additive (migration 202609280010): a missing table or function must
+            # never fail a generation whose attempt is already recorded.
+            try:
+                await self.rpc(token, "record_generation_attempt_diagnostics",
+                               {"p_run": str(run_id), "p_attempt": attempt_no, "p_diagnostics": item.diagnostics})
+            except HTTPException:
+                _LOG.warning("generation_attempt_diagnostics_not_persisted run_id=%s attempt=%d", run_id, attempt_no)
 
     async def finish(self, token: str, run_id: UUID, postflight_hash: str | None,
                      plan: dict | None, content_hash: str | None, error: str | None) -> str:

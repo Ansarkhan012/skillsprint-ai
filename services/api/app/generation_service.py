@@ -85,18 +85,25 @@ def _safe_path(parts) -> str:
     return ".".join(str(_safe_part(part)) for part in list(parts)[:16])
 
 
-def _log_schema_invalid(error: ValidationError, request_id: UUID) -> None:
-    """Log-only detail for SCHEMA_INVALID: full path, type and schema-derived message."""
+def validation_records(error: ValidationError) -> list[dict]:
+    """Full safe path, type and schema-derived message for each Pydantic error (max 20)."""
     records = []
-    for item in error.errors(include_url=False, include_context=False, include_input=False)[:20]:
+    for item in error.errors(include_url=False, include_context=False, include_input=False)[:MAX_DIAGNOSTIC_ERRORS]:
         kind = item.get("type", "unknown")
         kind = kind if isinstance(kind, str) and re.fullmatch(r"[a-z_]{1,64}", kind) else "unknown"
         record = {"loc": _safe_path(item.get("loc", ())), "type": kind}
         if kind in _SAFE_MESSAGE_TYPES and isinstance(item.get("msg"), str):
-            record["msg"] = item["msg"][:200]
+            record["msg"] = item["msg"][:160]
         records.append(record)
+    return records
+
+
+def _log_schema_invalid(error: ValidationError, request_id: UUID) -> list[dict]:
+    """Log-only detail for SCHEMA_INVALID: full path, type and schema-derived message."""
+    records = validation_records(error)
     _LOG.warning("generation_schema_invalid run_id=%s errors=%d diagnostics=%s",
                  request_id, error.error_count(), json.dumps(records))
+    return records
 
 
 class GenerationResult(BaseModel):
@@ -121,6 +128,8 @@ class AttemptTelemetry(BaseModel):
     error_code: str | None = None
     # Only the token counts the attempts RPC accepts; empty when the provider reports none.
     usage: dict[str, int] = {}
+    # Safe structural diagnostics for a failed parse (failure_detail); empty otherwise.
+    diagnostics: dict = {}
 
 
 def usage_metadata(response) -> dict[str, int]:
@@ -134,10 +143,68 @@ def usage_metadata(response) -> dict[str, int]:
 
 
 class StructuralFailure(Exception):
-    def __init__(self, code: str, diagnostics: tuple[dict[str, object], ...] = ()):
+    def __init__(self, code: str, diagnostics: tuple[dict[str, object], ...] = (), detail: dict | None = None):
         super().__init__(code)
         self.code = code
         self.diagnostics = diagnostics
+        # Safe, capped, structure-only description persisted with the attempt (never model text).
+        self.detail = detail or failure_detail("unspecified", code)
+
+
+MAX_DIAGNOSTIC_ERRORS = 20
+MAX_DIAGNOSTIC_BYTES = 4096
+
+
+def failure_detail(layer: str, code: str, errors: list[dict] | tuple = (), received: dict | None = None,
+                   error_count: int | None = None) -> dict:
+    """Bounded, content-free diagnostic: layer, code, error count, safe error records, shape.
+
+    Every string in it is one of our own field names, R# keys, reason/type codes or schema-derived
+    messages; it never contains model prose, document text, secrets or employee values.
+    """
+    records = [dict(item) for item in list(errors)[:MAX_DIAGNOSTIC_ERRORS]]
+    detail = {"layer": layer, "code": code, "error_count": len(errors) if error_count is None else error_count,
+              "errors": records}
+    if received:
+        detail["received"] = received
+    truncated = len(errors) > MAX_DIAGNOSTIC_ERRORS or (error_count or 0) > len(records)
+    while len(json.dumps(detail, sort_keys=True).encode()) > MAX_DIAGNOSTIC_BYTES and detail["errors"]:
+        detail["errors"].pop()
+        truncated = True
+    if len(json.dumps(detail, sort_keys=True).encode()) > MAX_DIAGNOSTIC_BYTES:
+        detail.pop("received", None)
+        truncated = True
+    if truncated:
+        detail["truncated"] = True
+    return detail
+
+
+def received_shape(decoded: object, size: int, expected_keys: list[str] | None = None) -> dict:
+    """Types, counts and our own key names only; unknown key names are counted, never echoed."""
+    shape: dict[str, object] = {"bytes": size, "type": type(decoded).__name__}
+    if isinstance(decoded, dict):
+        known = [key for key in decoded if isinstance(key, str) and (key in _SAFE_FIELD_NAMES
+                                                                     or _REQUIREMENT_KEY.fullmatch(key))]
+        shape["top_level_keys"] = sorted(known)[:20]
+        shape["unknown_top_level_keys"] = len(decoded) - len(known)
+        requirements = decoded.get("requirements")
+        if expected_keys is not None:
+            shape["requirement_keys_expected"] = len(expected_keys)
+            shape["requirements_type"] = type(requirements).__name__
+            if isinstance(requirements, dict):
+                keys = [key for key in requirements if isinstance(key, str) and _REQUIREMENT_KEY.fullmatch(key)]
+                shape["requirement_keys_received"] = len(requirements)
+                shape["requirement_keys"] = sorted(keys, key=lambda key: int(key[1:]))[:20]
+                shape["non_requirement_keys"] = len(requirements) - len(keys)
+                shape["missing_requirement_keys"] = [key for key in expected_keys if key not in requirements][:20]
+                shape["entry_field_counts"] = {key: len(value) if isinstance(value, dict) else type(value).__name__
+                                               for key, value in list(requirements.items())[:20]
+                                               if isinstance(key, str) and _REQUIREMENT_KEY.fullmatch(key)}
+            elif isinstance(requirements, list):
+                shape["requirement_items_received"] = len(requirements)
+    elif isinstance(decoded, list):
+        shape["items"] = len(decoded)
+    return shape
 
 
 def retry_feedback(failure: StructuralFailure) -> str:
@@ -236,7 +303,8 @@ def expand_source_keys(text: str, keys: dict[str, SourceKey], request_id: UUID |
                          detail["reason"], json.dumps(detail["requirement_ids"]), json.dumps(detail["allowed_keys"]))
         _LOG.warning("generation_source_key_invalid run_id=%s total_invalid=%d logged=%d",
                      request_id, len(details), min(len(details), 10))
-        raise StructuralFailure("SCHEMA_INVALID", tuple(problems[:5]))
+        raise StructuralFailure("SCHEMA_INVALID", tuple(problems[:5]), failure_detail(
+            "source_keys", "SCHEMA_INVALID", [{"loc": d["path"], "type": d["reason"], "key": d["key"]} for d in details]))
     return json.dumps(decoded, ensure_ascii=False)
 
 
@@ -258,7 +326,9 @@ def _structural(code: str, request_id: UUID, path: str, reason: str, **details) 
     record = {"path": path, "reason": reason, **details}
     _LOG.warning("generation_structural_failure run_id=%s code=%s details=%s",
                  request_id, code, json.dumps(record, sort_keys=True))
-    return StructuralFailure(code, ({"loc": _loc(path), "type": reason},))
+    layer = "content_assembly" if code == "ASSEMBLY_INPUT_INVALID" else "plan_structure"
+    return StructuralFailure(code, ({"loc": _loc(path), "type": reason},),
+                             failure_detail(layer, code, [{"loc": path, "type": reason, **details}]))
 
 
 def assemble_content(text: str, snapshot: GenerationInputSnapshot, request_id: UUID,
@@ -269,32 +339,43 @@ def assemble_content(text: str, snapshot: GenerationInputSnapshot, request_id: U
     distinct options or an index outside 0-2 fail as SCHEMA_INVALID (duplicate JSON keys as
     MALFORMED_JSON); nothing is repaired. The assembled plan then goes through parse_plan.
     """
+    size = len(text.encode("utf-8", errors="replace")) if text else 0
     if not text or not text.strip():
-        raise StructuralFailure("EMPTY_RESPONSE")
-    if len(text.encode("utf-8", errors="replace")) > 2_000_000:
-        raise StructuralFailure("RESPONSE_TOO_LARGE")
+        raise StructuralFailure("EMPTY_RESPONSE", detail=failure_detail("content_json", "EMPTY_RESPONSE",
+                                                                         received={"bytes": size}))
+    if size > 2_000_000:
+        raise StructuralFailure("RESPONSE_TOO_LARGE", detail=failure_detail("content_json", "RESPONSE_TOO_LARGE",
+                                                                             received={"bytes": size}))
     try:
         decoded = json.loads(text, object_pairs_hook=_unique_pairs, parse_constant=_reject_constant)
-    except RecursionError:
-        raise StructuralFailure("MALFORMED_JSON") from None
-    except (ValueError, TypeError):
-        raise StructuralFailure("MALFORMED_JSON") from None
+    except StructuralFailure:
+        raise StructuralFailure("MALFORMED_JSON", detail=failure_detail(
+            "content_json", "MALFORMED_JSON", [{"loc": "", "type": "duplicate_key_or_constant"}],
+            received={"bytes": size})) from None
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise StructuralFailure("MALFORMED_JSON", detail=failure_detail(
+            "content_json", "MALFORMED_JSON", [{"loc": "", "type": "invalid_json" if isinstance(exc, ValueError)
+                                                else "nesting_or_type"}], received={"bytes": size})) from None
+    expected = list(requirement_keys(snapshot))
+    shape = received_shape(decoded, size, expected)
     try:
         content = CONTENT_RESPONSE_MODELS[version].model_validate_json(json.dumps(decoded, ensure_ascii=False))
     except ValidationError as exc:
-        _log_schema_invalid(exc, request_id)
-        raise StructuralFailure("SCHEMA_INVALID", safe_validation_diagnostics(exc)) from None
-    expected = set(requirement_keys(snapshot))
+        records = _log_schema_invalid(exc, request_id)
+        raise StructuralFailure("SCHEMA_INVALID", safe_validation_diagnostics(exc), failure_detail(
+            "content_model", "SCHEMA_INVALID", records, shape, exc.error_count())) from None
     problems = [{"loc": ("requirements", key), "type": "missing_requirement_content"}
-                for key in sorted(expected - set(content.requirements), key=lambda key: int(key[1:]))]
+                for key in expected if key not in content.requirements]
     problems += [{"loc": ("requirements", "unknown_field"), "type": "unknown_requirement_key"}
-                 for _ in set(content.requirements) - expected]
+                 for _ in set(content.requirements) - set(expected)]
     if problems:
         _LOG.warning("generation_content_invalid run_id=%s expected_count=%d actual_count=%d diagnostics=%s",
                      request_id, len(expected), len(content.requirements),
                      json.dumps([{"loc": ".".join(map(str, item["loc"])), "type": item["type"]}
                                  for item in problems[:20]]))
-        raise StructuralFailure("SCHEMA_INVALID", tuple(problems[:5]))
+        raise StructuralFailure("SCHEMA_INVALID", tuple(problems[:5]), failure_detail(
+            "requirement_keys", "SCHEMA_INVALID",
+            [{"loc": ".".join(map(str, item["loc"])), "type": item["type"]} for item in problems], shape))
     try:
         plan = assemble_plan(content, snapshot, request_id)
     except ValueError as exc:
@@ -306,27 +387,34 @@ def assemble_content(text: str, snapshot: GenerationInputSnapshot, request_id: U
 
 def parse_plan(text: str, request_id: UUID, snapshot: GenerationInputSnapshot) -> OnboardingPlan:
     if not text or not text.strip():
-        raise StructuralFailure("EMPTY_RESPONSE")
+        raise StructuralFailure("EMPTY_RESPONSE", detail=failure_detail("plan_json", "EMPTY_RESPONSE"))
     try:
         response_bytes = text.encode("utf-8")
     except UnicodeError:
-        raise StructuralFailure("MALFORMED_JSON") from None
+        raise StructuralFailure("MALFORMED_JSON", detail=failure_detail(
+            "plan_json", "MALFORMED_JSON", [{"loc": "", "type": "invalid_unicode"}])) from None
     if len(response_bytes) > 2_000_000:
-        raise StructuralFailure("RESPONSE_TOO_LARGE")
+        raise StructuralFailure("RESPONSE_TOO_LARGE", detail=failure_detail(
+            "plan_json", "RESPONSE_TOO_LARGE", received={"bytes": len(response_bytes)}))
     try:
         decoded = json.loads(text, object_pairs_hook=_unique_pairs, parse_constant=_reject_constant)
         # JSON-mode Pydantic parsing preserves strict primitives while accepting UUID/date JSON strings.
         plan = OnboardingPlan.model_validate_json(json.dumps(decoded, ensure_ascii=False))
     except RecursionError:
         # Pathologically nested JSON exhausts the decoder stack; it is malformed output, not a crash.
-        raise StructuralFailure("MALFORMED_JSON") from None
+        raise StructuralFailure("MALFORMED_JSON", detail=failure_detail(
+            "plan_json", "MALFORMED_JSON", [{"loc": "", "type": "nesting_too_deep"}])) from None
     except (ValueError, TypeError, ValidationError) as exc:
         if isinstance(exc, StructuralFailure):
-            raise
+            raise StructuralFailure("MALFORMED_JSON", detail=failure_detail(
+                "plan_json", "MALFORMED_JSON", [{"loc": "", "type": "duplicate_key_or_constant"}])) from None
         if isinstance(exc, ValidationError):
-            _log_schema_invalid(exc, request_id)
-            raise StructuralFailure("SCHEMA_INVALID", safe_validation_diagnostics(exc)) from None
-        raise StructuralFailure("MALFORMED_JSON") from None
+            records = _log_schema_invalid(exc, request_id)
+            raise StructuralFailure("SCHEMA_INVALID", safe_validation_diagnostics(exc), failure_detail(
+                "onboarding_plan", "SCHEMA_INVALID", records, received={"bytes": len(response_bytes)},
+                error_count=exc.error_count())) from None
+        raise StructuralFailure("MALFORMED_JSON", detail=failure_detail(
+            "plan_json", "MALFORMED_JSON", [{"loc": "", "type": "invalid_json"}])) from None
     if plan.generation_request_id != request_id:
         raise _structural("REQUEST_ID_MISMATCH", request_id, "generation_request_id", "request_id_differs",
                           expected="reserved_run_id", actual="other_uuid")
@@ -472,8 +560,8 @@ async def generate_unverified(
             try:
                 response = await provider.generate(attempt_prompt, format_retry=bool(format_attempt))
                 if response.finish_reason != "STOP":
-                    raise StructuralFailure("TRUNCATED_RESPONSE" if response.finish_reason == "MAX_TOKENS"
-                                            else "PROVIDER_RESPONSE_REJECTED")
+                    code = "TRUNCATED_RESPONSE" if response.finish_reason == "MAX_TOKENS" else "PROVIDER_RESPONSE_REJECTED"
+                    raise StructuralFailure(code, detail=failure_detail("provider_response", code))
                 if prompt.prompt_version in CONTENT_PROMPT_VERSIONS:
                     text = assemble_content(response.text, snapshot, request_id, prompt.prompt_version)
                 elif keys is not None:
@@ -516,7 +604,7 @@ async def generate_unverified(
                         latency_ms=min(int((perf_counter() - started) * 1000), 600000),
                         response_hash=sha256(response_bytes).hexdigest() if response_bytes is not None else None,
                         response_size=len(response_bytes) if response_bytes is not None else None, parse_outcome="SCHEMA_INVALID",
-                        error_code=exc.code, usage=usage_metadata(response)))
+                        error_code=exc.code, usage=usage_metadata(response), diagnostics=exc.detail))
                 if format_attempt == 0 and exc.code in {"EMPTY_RESPONSE", "MALFORMED_JSON", "SCHEMA_INVALID",
                                                        "TRUNCATED_RESPONSE", "RESPONSE_TOO_LARGE"} and budget_allows():
                     attempt_prompt = prompt.model_copy(update={"rules": prompt.rules + "\n" + retry_feedback(exc)})
