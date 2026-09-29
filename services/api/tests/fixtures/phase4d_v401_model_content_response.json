@@ -1,0 +1,90 @@
+{
+  "requirements": {
+    "R4": {
+      "quiz_question": "A colleague emails you an unexpected link asking for your login. What should you do?",
+      "quiz_options": ["Report it through the security channel and don’t click", "Click it to check whether it’s real", "Forward it to your team"],
+      "correct_option_index": 0,
+      "quiz_explanation": "Suspicious requests are reported, not tested — that’s the core of the awareness training.",
+      "module_title": "Security awareness basics",
+      "module_purpose": "Know the everyday security expectations — phishing, passwords, reporting — from your second day onward.",
+      "estimated_minutes": 45,
+      "objective": "Recognise common security threats and report them correctly.",
+      "task_description": "Finish the security awareness course and its short knowledge check.",
+      "task_expected_outcome": "Course and knowledge check completed; completion is visible to your manager.",
+      "task_completion_criteria": ["Course completed", "Knowledge check passed"],
+      "checklist_activity": "Security awareness training — done within 2 days of joining"
+    },
+    "R1": {
+      "module_title": "Set up your workstation & sandbox",
+      "module_purpose": "Get a working, approved development environment so every later engineering task happens safely in the sandbox rather than on production systems or personal machines, as the onboarding requirement expects of new engineers.",
+      "estimated_minutes": 240,
+      "objective": "Configure the approved workstation image and a sandbox you can build and test in.",
+      "task_description": "Install the approved image, request sandbox access, and run the sample build end to end.",
+      "task_expected_outcome": "Sample build passes inside the sandbox.",
+      "task_completion_criteria": ["Approved image installed", "Sandbox access granted", "Sample build passes", "Setup confirmed by onboarding buddy"],
+      "checklist_activity": "Workstation + sandbox ready within 2 days of your joining date",
+      "quiz_question": "Where should you run code while onboarding?",
+      "quiz_options": ["On production servers", "In the approved sandbox", "On a personal laptop"],
+      "correct_option_index": 1,
+      "quiz_explanation": "All onboarding work happens in the approved sandbox."
+    },
+    "R5": {
+      "module_title": "Acknowledge company policies",
+      "module_purpose": "Read the required policies and record that you have done so on your first day.",
+      "estimated_minutes": 20,
+      "objective": "Acknowledge the required policies.",
+      "task_description": "Read each required policy and submit the acknowledgement form.",
+      "task_expected_outcome": "Acknowledgement recorded.",
+      "task_completion_criteria": ["Acknowledgement submitted"],
+      "checklist_activity": "Policy acknowledgement within 1 day of joining",
+      "quiz_question": "How soon must policies be acknowledged?",
+      "quiz_options": ["Within 1 day of joining", "Within a month", "Before your first review"],
+      "correct_option_index": 0,
+      "quiz_explanation": "The requirement allows 1 day from the joining date."
+    },
+    "R2": {
+      "module_title": "Secure coding",
+      "module_purpose": "Write and review code using the required secure coding practices.",
+      "estimated_minutes": 600,
+      "objective": "Apply secure coding practices in your own changes and in code review.",
+      "task_description": "Complete the secure coding course, then fix the seeded issues in the sandbox exercise repository.",
+      "task_expected_outcome": "Course done; all seeded issues fixed and reviewed.",
+      "task_completion_criteria": ["Course completed", "Seeded issues fixed", "Fix reviewed", "Lessons noted", "Exercise repository archived"],
+      "checklist_activity": "Secure coding training finished within 5 days of joining",
+      "quiz_question": "Which modules must be finished before secure coding?",
+      "quiz_options": ["None", "The final assessment", "Workstation setup and security awareness"],
+      "correct_option_index": 2,
+      "quiz_explanation": "Secure coding builds on the sandbox and on security awareness."
+    },
+    "R6": {
+      "module_title": "Final onboarding assessment",
+      "module_purpose": "Show you’re ready to work independently.",
+      "estimated_minutes": 60,
+      "objective": "Demonstrate what you learned across onboarding.",
+      "task_description": "Take the final assessment once every other module is complete.",
+      "task_expected_outcome": "Assessment result recorded.",
+      "task_completion_criteria": ["Assessment submitted", "Result recorded"],
+      "checklist_activity": "Final assessment within 7 days of joining",
+      "quiz_question": "When can you take the final assessment?",
+      "quiz_options": ["Any time", "After all other modules", "Only after 30 days"],
+      "correct_option_index": 1,
+      "quiz_explanation": "It depends on every other onboarding requirement."
+    },
+    "R3": {
+      "module_title": "Repository workflow — hands-on",
+      "module_purpose": "Demonstrate the approved branch → review → merge workflow on a real change.",
+      "estimated_minutes": 90,
+      "objective": "Use the approved repository workflow from branch to merge.",
+      "task_description": "Open a branch, make a small change, get it reviewed and merge it following the workflow.",
+      "task_expected_outcome": "A reviewed change merged through the approved workflow.",
+      "task_completion_criteria": ["Branch created", "Review approved", "Change merged"],
+      "checklist_activity": "Repository workflow demonstrated within 6 days of joining",
+      "quiz_question": "What completes this requirement?",
+      "quiz_options": ["Reading the workflow guide", "Demonstrating the workflow on a reviewed change", "Watching a recorded demo"],
+      "correct_option_index": 1,
+      "quiz_explanation": "It must be demonstrated, not just read."
+    }
+  },
+  "plan_title": "Your first week as an engineer",
+  "plan_summary": "Policies and security first, then sandbox setup and secure coding, a hands-on repository exercise, and a final assessment on day 7."
+}

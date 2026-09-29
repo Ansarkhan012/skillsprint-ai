@@ -12,7 +12,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from .generation_content import CONTENT_PROMPT_VERSION, ContentResponse, assemble_plan, requirement_keys
+from .generation_content import (CONTENT_PROMPT_VERSIONS, CONTENT_RESPONSE_MODELS, CURRENT_CONTENT_VERSION,
+                                 assemble_plan, requirement_keys)
 from .generation_context import input_hash
 from .generation_models import GenerationInputSnapshot, PreflightResult
 from .generation_output import OnboardingPlan
@@ -239,8 +240,30 @@ def expand_source_keys(text: str, keys: dict[str, SourceKey], request_id: UUID |
     return json.dumps(decoded, ensure_ascii=False)
 
 
-def assemble_content(text: str, snapshot: GenerationInputSnapshot, request_id: UUID) -> str:
-    """4.0.0: validate the model's prose-only response, then build the full plan in Python.
+_ITEM_FIELDS = ("learning_objectives", "key_concepts", "activities", "checklist_items",
+                "tasks", "scenarios", "quizzes", "assessments", "completion_criteria")
+_ASSEMBLY_ERRORS = frozenset({"SOURCE_REFS_OUT_OF_BOUNDS", "DEPENDENCY_CYCLE", "RRM_STAGE_NOT_IN_ACTIVE_SET"})
+
+
+def _loc(path: str) -> tuple:
+    return tuple(int(part) if part.isdigit() else part for part in path.split("."))
+
+
+def _structural(code: str, request_id: UUID, path: str, reason: str, **details) -> StructuralFailure:
+    """Log one structured, content-free diagnostic and return the failure to raise.
+
+    Only our own field names, indexes, counts, categories and numeric stage configuration are
+    logged: never model text, document text, labels, employee values or raw responses.
+    """
+    record = {"path": path, "reason": reason, **details}
+    _LOG.warning("generation_structural_failure run_id=%s code=%s details=%s",
+                 request_id, code, json.dumps(record, sort_keys=True))
+    return StructuralFailure(code, ({"loc": _loc(path), "type": reason},))
+
+
+def assemble_content(text: str, snapshot: GenerationInputSnapshot, request_id: UUID,
+                     version: str = CURRENT_CONTENT_VERSION) -> str:
+    """Content-only (4.0.x): validate the model's prose-only response, then build the plan in Python.
 
     Missing, extra or duplicate requirement entries, blank text, a quiz without exactly three
     distinct options or an index outside 0-2 fail as SCHEMA_INVALID (duplicate JSON keys as
@@ -257,7 +280,7 @@ def assemble_content(text: str, snapshot: GenerationInputSnapshot, request_id: U
     except (ValueError, TypeError):
         raise StructuralFailure("MALFORMED_JSON") from None
     try:
-        content = ContentResponse.model_validate_json(json.dumps(decoded, ensure_ascii=False))
+        content = CONTENT_RESPONSE_MODELS[version].model_validate_json(json.dumps(decoded, ensure_ascii=False))
     except ValidationError as exc:
         _log_schema_invalid(exc, request_id)
         raise StructuralFailure("SCHEMA_INVALID", safe_validation_diagnostics(exc)) from None
@@ -267,11 +290,18 @@ def assemble_content(text: str, snapshot: GenerationInputSnapshot, request_id: U
     problems += [{"loc": ("requirements", "unknown_field"), "type": "unknown_requirement_key"}
                  for _ in set(content.requirements) - expected]
     if problems:
-        _LOG.warning("generation_content_invalid run_id=%s diagnostics=%s", request_id,
+        _LOG.warning("generation_content_invalid run_id=%s expected_count=%d actual_count=%d diagnostics=%s",
+                     request_id, len(expected), len(content.requirements),
                      json.dumps([{"loc": ".".join(map(str, item["loc"])), "type": item["type"]}
                                  for item in problems[:20]]))
         raise StructuralFailure("SCHEMA_INVALID", tuple(problems[:5]))
-    return json.dumps(assemble_plan(content, snapshot, request_id), ensure_ascii=False)
+    try:
+        plan = assemble_plan(content, snapshot, request_id)
+    except ValueError as exc:
+        # Deterministic input problems (normally blocked by preflight and the readiness gate).
+        reason = str(exc) if str(exc) in _ASSEMBLY_ERRORS else "UNEXPECTED_ASSEMBLY_ERROR"
+        raise _structural("ASSEMBLY_INPUT_INVALID", request_id, "assembly", reason.lower()) from None
+    return json.dumps(plan, ensure_ascii=False)
 
 
 def parse_plan(text: str, request_id: UUID, snapshot: GenerationInputSnapshot) -> OnboardingPlan:
@@ -298,43 +328,74 @@ def parse_plan(text: str, request_id: UUID, snapshot: GenerationInputSnapshot) -
             raise StructuralFailure("SCHEMA_INVALID", safe_validation_diagnostics(exc)) from None
         raise StructuralFailure("MALFORMED_JSON") from None
     if plan.generation_request_id != request_id:
-        raise StructuralFailure("REQUEST_ID_MISMATCH")
+        raise _structural("REQUEST_ID_MISMATCH", request_id, "generation_request_id", "request_id_differs",
+                          expected="reserved_run_id", actual="other_uuid")
     context = plan.employee_context
     employee = snapshot.employee
-    if (context.employee_id != employee.employee_id or context.role_id != employee.role_id
-            or context.department_id != employee.department_id or context.experience_level != employee.experience
-            or context.location_code != employee.location_code or context.joining_date != employee.joining_date):
-        raise StructuralFailure("CONTEXT_IDENTITY_MISMATCH")
+    differing = [name for name, actual, frozen in (
+        ("employee_id", context.employee_id, employee.employee_id), ("role_id", context.role_id, employee.role_id),
+        ("department_id", context.department_id, employee.department_id),
+        ("experience_level", context.experience_level, employee.experience),
+        ("location_code", context.location_code, employee.location_code),
+        ("joining_date", context.joining_date, employee.joining_date)) if actual != frozen]
+    if differing:
+        raise _structural("CONTEXT_IDENTITY_MISMATCH", request_id, "employee_context", "identity_fields_differ",
+                          fields=differing)
     expected = snapshot.stage_set.items
-    if len(plan.plan.stages) != len(expected) or any(
-            (actual.stage_id, actual.label, actual.sequence, actual.target_start_day, actual.target_end_day)
-            != (stage.stage_definition_id, stage.label, stage.sequence, stage.start_day, stage.end_day)
-            for actual, stage in zip(plan.plan.stages, expected)):
-        raise StructuralFailure("STAGE_CONTRACT_MISMATCH")
+    expected_ids = [stage.stage_definition_id for stage in expected]
+    actual_ids = [stage.stage_id for stage in plan.plan.stages]
+    mismatches = []
+    for index, (actual, stage) in enumerate(zip(plan.plan.stages, expected)):
+        fields = []
+        if actual.stage_id != stage.stage_definition_id:
+            fields.append("stage_id:" + ("other_frozen_stage" if actual.stage_id in expected_ids else "unknown_stage"))
+        if actual.label != stage.label:
+            fields.append("label")
+        for name, value, frozen in (("sequence", actual.sequence, stage.sequence),
+                                    ("target_start_day", actual.target_start_day, stage.start_day),
+                                    ("target_end_day", actual.target_end_day, stage.end_day)):
+            if value != frozen:
+                fields.append(f"{name}:expected={frozen},actual={value}")
+        if fields:
+            mismatches.append({"index": index, "fields": fields})
+    if len(actual_ids) != len(expected_ids) or mismatches:
+        raise _structural(
+            "STAGE_CONTRACT_MISMATCH", request_id, "plan.stages", "stage_contract",
+            expected_count=len(expected_ids), actual_count=len(actual_ids),
+            missing_expected_indexes=[i for i, sid in enumerate(expected_ids) if sid not in actual_ids],
+            unknown_actual_indexes=[i for i, sid in enumerate(actual_ids) if sid not in expected_ids],
+            mismatches=mismatches[:10])
     allowed_requirements = {item.revision_id for item in snapshot.requirements}
     allowed_sources = {(ref.document_version_id, ref.chunk_id): canonical_json(ref.locator)
                        for item in snapshot.requirements for ref in item.evidence}
     stages = {stage.stage_definition_id for stage in expected}
-    for stage in plan.plan.stages:
-        for module in stage.modules:
-            items = [module]
-            for field in ("learning_objectives", "key_concepts", "activities", "checklist_items",
-                          "tasks", "scenarios", "quizzes", "assessments", "completion_criteria"):
-                items.extend(getattr(module, field))
-            for assessment in module.assessments:
-                items.extend(assessment.rubric)
-            for item in items:
-                if any(ref not in allowed_requirements for ref in item.requirement_ids):
-                    raise StructuralFailure("UNKNOWN_REQUIREMENT_REF")
-                if any(allowed_sources.get((ref.document_version_id, ref.chunk_id)) != ref.locator
-                       for ref in item.source_refs):
-                    raise StructuralFailure("UNKNOWN_SOURCE_REF")
-            for item in (*module.checklist_items, *module.tasks):
-                if item.due_stage_id not in stages:
-                    raise StructuralFailure("UNKNOWN_STAGE_REF")
-    for item in plan.insufficient_information:
+    for si, stage in enumerate(plan.plan.stages):
+        for mi, module in enumerate(stage.modules):
+            base = f"plan.stages.{si}.modules.{mi}"
+            items = [(base, module)]
+            for field in _ITEM_FIELDS:
+                items.extend((f"{base}.{field}.{k}", item) for k, item in enumerate(getattr(module, field)))
+            for ai, assessment in enumerate(module.assessments):
+                items.extend((f"{base}.assessments.{ai}.rubric.{k}", row) for k, row in enumerate(assessment.rubric))
+            for path, item in items:
+                for r, ref in enumerate(item.requirement_ids):
+                    if ref not in allowed_requirements:
+                        raise _structural("UNKNOWN_REQUIREMENT_REF", request_id, f"{path}.requirement_ids.{r}",
+                                          "not_in_frozen_requirements")
+                for r, ref in enumerate(item.source_refs):
+                    frozen = allowed_sources.get((ref.document_version_id, ref.chunk_id))
+                    if frozen != ref.locator:
+                        raise _structural("UNKNOWN_SOURCE_REF", request_id, f"{path}.source_refs.{r}",
+                                          "unknown_version_or_chunk" if frozen is None else "locator_differs")
+            for field in ("checklist_items", "tasks"):
+                for k, item in enumerate(getattr(module, field)):
+                    if item.due_stage_id not in stages:
+                        raise _structural("UNKNOWN_STAGE_REF", request_id, f"{base}.{field}.{k}.due_stage_id",
+                                          "not_a_frozen_stage")
+    for index, item in enumerate(plan.insufficient_information):
         if item.requirement_id is not None and item.requirement_id not in allowed_requirements:
-            raise StructuralFailure("UNKNOWN_REQUIREMENT_REF")
+            raise _structural("UNKNOWN_REQUIREMENT_REF", request_id,
+                              f"insufficient_information.{index}.requirement_id", "not_in_frozen_requirements")
     return plan
 
 
@@ -352,6 +413,18 @@ MAX_TRANSPORT_RETRIES = 2
 # Whole-run budget: a retry is skipped when elapsed time plus one full provider
 # deadline would exceed it, so a slow model cannot chain two long calls.
 RUN_BUDGET_SECONDS = 295.0  # one full 290 s call fits; a second long call never does
+
+
+def structural_retry_window(call_deadline: float) -> float:
+    """Seconds within which a first call must finish for a format retry to be attempted.
+
+    budget_allows() requires elapsed + call_deadline <= RUN_BUDGET_SECONDS before retrying,
+    so a retry happens only if the first attempt ended within RUN_BUDGET_SECONDS -
+    call_deadline. With the 290 s NaraRouter deadline that window is 5 s, while observed
+    responses take 69-290 s: in practice every structural failure is final. Kept as is on
+    purpose until a retry policy is chosen after the first successful 4.0.x generation.
+    """
+    return max(0.0, RUN_BUDGET_SECONDS - call_deadline)
 RETRY_BASE_SECONDS = 2.0
 RETRY_MAX_SECONDS = 8.0
 
@@ -401,8 +474,8 @@ async def generate_unverified(
                 if response.finish_reason != "STOP":
                     raise StructuralFailure("TRUNCATED_RESPONSE" if response.finish_reason == "MAX_TOKENS"
                                             else "PROVIDER_RESPONSE_REJECTED")
-                if prompt.prompt_version == CONTENT_PROMPT_VERSION:
-                    text = assemble_content(response.text, snapshot, request_id)
+                if prompt.prompt_version in CONTENT_PROMPT_VERSIONS:
+                    text = assemble_content(response.text, snapshot, request_id, prompt.prompt_version)
                 elif keys is not None:
                     text = expand_source_keys(response.text, keys, request_id)
                 else:

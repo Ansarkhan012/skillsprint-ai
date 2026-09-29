@@ -9,7 +9,7 @@ import httpx
 from pydantic import ConfigDict, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .generation_content import CONTENT_PROMPT_VERSION
+from .generation_content import CONTENT_PROMPT_VERSIONS
 from .generation_prompt import FORMAT_RETRY_RULE, MAX_PROVIDER_REQUEST_BYTES, PromptPack, provider_schema_for
 from .generation_provider import (ProviderConfig, ProviderFailure, json_schema_response_format,
                                   ProviderResult, ProviderUsage, _bounded_retry_after, post_with_deadline)
@@ -110,7 +110,7 @@ class NaraRouterEnvironment(BaseSettings):
 def nararouter_request_payload(prompt: PromptPack, config: NaraRouterConfig,
                               *, format_retry: bool = False) -> dict:
     """Chat-completions envelope; model entitlement must be discovered separately."""
-    content = prompt.prompt_version == CONTENT_PROMPT_VERSION
+    content = prompt.prompt_version in CONTENT_PROMPT_VERSIONS
     system = prompt.system + "\n" + prompt.rules + "\n" + (CONTENT_OUTPUT_INSTRUCTIONS if content else OUTPUT_INSTRUCTIONS)
     if format_retry:
         system += "\n" + FORMAT_RETRY_RULE

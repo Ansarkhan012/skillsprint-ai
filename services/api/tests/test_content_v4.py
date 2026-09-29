@@ -12,8 +12,10 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from app.generation_content import (CONTENT_PROMPT_VERSION, ID_NAMESPACE, assemble_plan, generated_id,
-                                    module_layout, requirement_keys, source_refs, ContentResponse)
+# This module pins the historical 4.0.0 contract; 4.0.1 (current) is covered in test_readiness.py.
+from app.generation_content import (CONTENT_V400 as CONTENT_PROMPT_VERSION, CONTENT_V401, ID_NAMESPACE, assemble_plan,
+                                    generated_id, module_layout, requirement_keys, source_refs,
+                                    ContentResponseV400 as ContentResponse)
 from app.generation_context import input_hash
 from app.generation_models import GenerationInputSnapshot, PreflightResult
 from app.generation_persistence import GenerationStore
@@ -34,6 +36,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 MIGRATIONS = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
 RUN = UUID("aaccc0b5-e109-432e-88ae-805acd35d96a")
 V4_HASH = "d0f338ed27b47e91207d3346fad2b0055f955960b258874804e9b17db8503b43"
+V401_HASH = "83c231d9c9647da559d57e6ece4680ef8f8902c6e38c1e484ae59888eb91b00a"
 UUID_TEXT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
 
@@ -85,7 +88,7 @@ def test_real_snapshot_content_passes_every_boundary_to_verified_with_warning():
     frozen, response = snapshot(), content()
     prompt = build_prompt(frozen, RUN, version=CONTENT_PROMPT_VERSION)
     assert schema_errors(prompt.response_schema, response) == []                       # 1 content schema
-    assembled = json.loads(assemble_content(json.dumps(response), frozen, RUN))       # 2 assembly
+    assembled = json.loads(assemble_content(json.dumps(response), frozen, RUN, CONTENT_PROMPT_VERSION))       # 2 assembly
     plan = parse_plan(json.dumps(assembled), RUN, frozen)                              # 3 Pydantic + parse_plan
     result = run(frozen, json.dumps(response))                                         # 4 API generation path
     assert result.status == "UNVERIFIED" and (result.prompt_version, result.template_hash) == (
@@ -216,7 +219,7 @@ def test_prompt_is_content_only_and_exposes_no_uuids_to_the_model():
     frozen = snapshot()
     prompt = build_prompt(frozen, RUN, version=CONTENT_PROMPT_VERSION)
     assert (prompt.prompt_version, prompt.template_hash) == (CONTENT_PROMPT_VERSION, V4_HASH)
-    assert content_template_hash() == V4_HASH
+    assert content_template_hash(CONTENT_PROMPT_VERSION) == V4_HASH
     assert not UUID_TEXT.search(prompt.untrusted_data) and "generation_request_id" not in prompt.untrusted_data
     data = json.loads(re.search(r'application/json">\n(.*)\n</untrusted', prompt.untrusted_data, re.S).group(1))
     assert [r["key"] for r in data["requirements"]] == [f"R{i}" for i in range(1, 7)]
@@ -261,7 +264,7 @@ def _mutated(change):
 def test_invalid_content_fails_without_repair(text, code, diagnostic):
     frozen = snapshot()
     with pytest.raises(StructuralFailure) as caught:
-        assemble_content(text, frozen, RUN)
+        assemble_content(text, frozen, RUN, CONTENT_PROMPT_VERSION)
     assert caught.value.code == code
     if diagnostic:
         assert any(item["loc"] == diagnostic for item in caught.value.diagnostics)
@@ -391,8 +394,8 @@ def test_groq_and_gemini_send_the_v4_content_schema():
 
 def test_flags_select_versions_and_historical_identities_are_unchanged(monkeypatch):
     frozen = snapshot()
-    for content_only, source_keys, expected in (("true", "false", (CONTENT_PROMPT_VERSION, V4_HASH)),
-                                                ("true", "true", (CONTENT_PROMPT_VERSION, V4_HASH)),
+    for content_only, source_keys, expected in (("true", "false", (CONTENT_V401, V401_HASH)),
+                                                ("true", "true", (CONTENT_V401, V401_HASH)),
                                                 ("false", "true", (SOURCE_KEYS_V31_PROMPT_VERSION, V31_HASH)),
                                                 ("false", "false", (PROMPT_VERSION, V2_HASH))):
         monkeypatch.setenv("GENERATION_CONTENT_ONLY", content_only)
@@ -464,7 +467,7 @@ def test_api_reserves_v4_and_persists_an_assembled_plan(monkeypatch):
     finally:
         app.dependency_overrides.clear()
     reserve = next(payload for name, payload in store.calls if name == "reserve")
-    assert (reserve["p_prompt_version"], reserve["p_template_hash"]) == (CONTENT_PROMPT_VERSION, V4_HASH)
-    assert provider.prompts[0].prompt_version == CONTENT_PROMPT_VERSION
+    assert (reserve["p_prompt_version"], reserve["p_template_hash"]) == (CONTENT_V401, V401_HASH)
+    assert provider.prompts[0].prompt_version == CONTENT_V401  # reserved == executed
     assert store.status in ("UNVERIFIED", "STALE_INPUT") and store.last_finish[1]["schema_version"] == \
         "onboarding-plan/1.0.0"

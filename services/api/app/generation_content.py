@@ -20,19 +20,65 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .generation_models import GenerationInputSnapshot
 from .rrm_rules import canonical_json
 
-CONTENT_PROMPT_VERSION = "phase4d-content-only/4.0.0"
-CONTENT_PROJECTION_VERSION = "generation-content/4.0.0"
+CONTENT_V400 = "phase4d-content-only/4.0.0"   # historical; reproducible, never live-selected
+CONTENT_V401 = "phase4d-content-only/4.0.1"   # current intended live contract
+CURRENT_CONTENT_VERSION = CONTENT_V401
+CONTENT_PROMPT_VERSIONS = frozenset({CONTENT_V400, CONTENT_V401})
+CONTENT_PROJECTION_VERSION = "generation-content/4.0.0"  # the projection is unchanged in 4.0.1
 OUTPUT_SCHEMA_VERSION = "onboarding-plan/1.0.0"
 QUIZ_OPTION_COUNT = 3
 # Fixed namespace for backend-assigned ids; changing it changes every generated id.
 ID_NAMESPACE = UUID("0f4a7c2e-9d31-5b8e-a6c4-3e2d1f0b9a57")
 
+# Same bounds as OnboardingPlan's ShortText / Text.
 Short = Annotated[str, Field(min_length=1, max_length=240, pattern=r"\S")]
 Prose = Annotated[str, Field(min_length=1, max_length=4000, pattern=r"\S")]
 
 
+def _distinct_options(options: tuple[str, ...]) -> None:
+    # Business rule: a single-choice quiz whose options repeat has no well-defined answer.
+    if len({" ".join(option.lower().split()) for option in options}) != len(options):
+        raise ValueError("DUPLICATE_QUIZ_OPTION")
+
+
 class RequirementContent(BaseModel):
-    """Everything the model writes for one requirement; nothing mechanical."""
+    """4.0.1: everything the model writes for one requirement; nothing mechanical.
+
+    Bounds equal the final OnboardingPlan contract, except two intentional content-generation
+    bounds: exactly 3 quiz options (the backend maps correct_option_index 0-2 to option ids)
+    and distinct options (business rule). 4.0.0's narrower minutes (5-480) and criteria
+    (max 3) were accidental: they could reject plans the final contract accepts.
+    """
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    module_title: Short                                                   # Module.title ShortText
+    module_purpose: Prose                                                 # Module.purpose Text
+    estimated_minutes: int = Field(ge=1, le=10080)                         # Module.estimated_minutes
+    objective: Prose                                                      # Objective.statement Text
+    task_description: Prose                                               # Task.description Text
+    task_expected_outcome: Prose                                          # Task.expected_outcome Text
+    task_completion_criteria: tuple[Short, ...] = Field(min_length=1, max_length=20)  # Task bounds
+    checklist_activity: Prose                                             # ChecklistItem.activity Text
+    quiz_question: Prose                                                  # Quiz.question Text
+    quiz_options: tuple[Short, ...] = Field(min_length=QUIZ_OPTION_COUNT, max_length=QUIZ_OPTION_COUNT)
+    correct_option_index: int = Field(ge=0, le=QUIZ_OPTION_COUNT - 1)
+    quiz_explanation: Prose                                               # Quiz.explanation Text
+
+    @model_validator(mode="after")
+    def distinct_options(self):
+        _distinct_options(self.quiz_options)
+        return self
+
+
+class ContentResponse(BaseModel):
+    """4.0.1 response: plan prose plus one entry per backend-issued requirement key."""
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    plan_title: Short                                                     # Plan.title ShortText
+    plan_summary: Prose                                                   # Plan.summary Text
+    requirements: dict[str, RequirementContent]
+
+
+class RequirementContentV400(BaseModel):
+    """4.0.0 item contract, frozen byte-for-byte: its JSON schema is bound into the 4.0.0 hash."""
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
     module_title: Short
     module_purpose: Prose
@@ -49,16 +95,19 @@ class RequirementContent(BaseModel):
 
     @model_validator(mode="after")
     def distinct_options(self):
-        if len({" ".join(option.lower().split()) for option in self.quiz_options}) != QUIZ_OPTION_COUNT:
-            raise ValueError("DUPLICATE_QUIZ_OPTION")
+        _distinct_options(self.quiz_options)
         return self
 
 
-class ContentResponse(BaseModel):
+class ContentResponseV400(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
     plan_title: Short
     plan_summary: Prose
-    requirements: dict[str, RequirementContent]
+    requirements: dict[str, RequirementContentV400]
+
+
+CONTENT_ITEM_MODELS = {CONTENT_V400: RequirementContentV400, CONTENT_V401: RequirementContent}
+CONTENT_RESPONSE_MODELS = {CONTENT_V400: ContentResponseV400, CONTENT_V401: ContentResponse}
 
 
 def requirement_keys(snapshot: GenerationInputSnapshot) -> dict[str, object]:
