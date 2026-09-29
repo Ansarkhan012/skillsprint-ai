@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 
 from .generation_context import preflight
 from .generation_persistence import GenerationStore, get_generation_store
-from .generation_prompt import SCHEMA_VERSION, SOURCE_KEYS_PROMPT_VERSION, build_prompt
+from .generation_prompt import SCHEMA_VERSION, build_prompt
 from .generation_provider import (GeminiEnvironment, GeminiProvider, GroqEnvironment, GroqProvider,
                                   GenerationProvider, ProviderConfig, ProviderFailure)
 from .generation_service import generate_unverified
@@ -139,7 +139,7 @@ async def create_generation(
         await store.record_attempt(principal.token, run_id, item)
 
     result = await generate_unverified(first, run_id, provider, on_attempt=record,
-                                        source_keys=prompt.prompt_version == SOURCE_KEYS_PROMPT_VERSION)
+                                        prompt_version=prompt.prompt_version)
     if result.status != "UNVERIFIED" or result.plan is None:
         status = await store.finish(principal.token, run_id, None, None, None,
                                     result.error_code or "GENERATION_INTERNAL_ERROR")

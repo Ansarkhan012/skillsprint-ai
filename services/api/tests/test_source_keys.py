@@ -16,6 +16,7 @@ from app import generation_api
 from app.generation_context import input_hash
 from app.generation_models import PreflightResult
 from app.generation_prompt import (PROMPT_VERSION, PROVIDER_OUTPUT_SCHEMA, PROVIDER_RULES, SOURCE_KEYS_PROMPT_VERSION,
+                                   SOURCE_KEYS_V31_PROMPT_VERSION,
                                    SOURCE_KEYS_PROVIDER_RULES, build_prompt, current_provider_schema,
                                    source_key_map, source_keys_enabled, source_keys_template_hash, template_hash)
 from app.generation_provider import GeminiProvider, GroqProvider, ProviderConfig, ProviderResult
@@ -28,6 +29,7 @@ from test_generation_service import REQUEST, complete_output
 
 V2_HASH = "11b1127daf611a0d6739c185f9815570cff9abd29e73bcee7117121daf85abbc"
 V3_HASH = "5bb4fcd13076012b87dcc58381cf74209ae3910dba8e449d035cc6d49cb388b4"
+V31_HASH = "c4c9349fa689a281d392f0d03a6e275aeef6ef59130c23447d2a28e2bce1c58f"
 # Computed from commit 8a2d5a5 (before this feature) with the same fixture: flag-off output
 # must stay byte-identical to it.
 GOLDEN_PROMPT_SHA = "146904d5f61648bf7f8f4f8a16e1318891b21b9fa3076ba3bb0f8ae2423d3028"
@@ -158,9 +160,9 @@ def test_key_map_is_deterministic_globally_unique_and_derived_from_frozen_snapsh
     assert s2.excerpt == ("Enable multi-factor authentication. " + "x" * 300)[:100]
 
 
-def test_flag_on_prompt_has_v3_contract_evidence_table_and_no_full_refs():
+def test_historical_v3_prompt_identity_evidence_table_and_no_full_refs():
     snapshot = multi_document_snapshot()
-    prompt = build_prompt(snapshot, REQUEST, source_keys=True)
+    prompt = build_prompt(snapshot, REQUEST, version=SOURCE_KEYS_PROMPT_VERSION)
     assert (prompt.prompt_version, prompt.template_hash) == (SOURCE_KEYS_PROMPT_VERSION, V3_HASH)
     assert source_keys_template_hash() == V3_HASH != template_hash()
     assert prompt.rules == SOURCE_KEYS_PROVIDER_RULES and "evidence keys" in prompt.rules
@@ -172,7 +174,7 @@ def test_flag_on_prompt_has_v3_contract_evidence_table_and_no_full_refs():
     labels = {str(min(VERSION, VERSION2)): "D1", str(max(VERSION, VERSION2)): "D2"}
     assert data["evidence"][1].startswith(f"S2 -> {labels[str(VERSION2)]} | Access > MFA | Enable multi-factor")
     assert str(CHUNK2) not in prompt.untrusted_data and str(VERSION2) not in prompt.untrusted_data
-    assert build_prompt(snapshot, REQUEST, source_keys=True) == prompt
+    assert build_prompt(snapshot, REQUEST, version=SOURCE_KEYS_PROMPT_VERSION) == prompt
     assert prompt.within_budget
 
 
@@ -254,7 +256,7 @@ def test_single_key_expands_to_exact_frozen_reference_and_plan_matches_full_ref_
     keys_run = run(RecordingProvider(json.dumps(keyed(complete_output(), ["S1"]))))
     full_run = run(RecordingProvider(json.dumps(complete_output())), source_keys=False)
     assert keys_run.status == "UNVERIFIED"
-    assert (keys_run.prompt_version, keys_run.template_hash) == (SOURCE_KEYS_PROMPT_VERSION, V3_HASH)
+    assert (keys_run.prompt_version, keys_run.template_hash) == (SOURCE_KEYS_V31_PROMPT_VERSION, V31_HASH)
     assert keys_run.plan == full_run.plan  # the rest of the app sees today's objects
 
 
@@ -337,7 +339,7 @@ class KeyedProvider:
 
 
 @pytest.mark.parametrize("flag,version,expected_hash", [
-    ("true", SOURCE_KEYS_PROMPT_VERSION, V3_HASH), ("false", PROMPT_VERSION, V2_HASH)])
+    ("true", SOURCE_KEYS_V31_PROMPT_VERSION, V31_HASH), ("false", PROMPT_VERSION, V2_HASH)])
 def test_reservation_records_the_prompt_contract_build_prompt_selected(monkeypatch, flag, version, expected_hash):
     from fastapi.testclient import TestClient
     from app import security
@@ -465,8 +467,9 @@ def test_shared_chunks_get_one_key_owned_by_every_requirement_that_cites_them():
         assert len(allowed) == 4  # 3 shared + own; nobody is left without a key
     prompt = build_prompt(snapshot, REQUEST, source_keys=True)
     data = json.loads(re.search(r'application/json">\n(.*)\n</untrusted', prompt.untrusted_data, re.S).group(1))
-    for req in data["requirements"]:
-        assert all(str(req["revision_id"]) in keys[key].requirement_ids for key in req["source_keys"])
+    for req in data["requirements"]:  # 3.1.0: every key the requirement may cite, and only those
+        assert req["allowed_sources"] == [key for key, item in keys.items()
+                                          if req["revision_id"] in item.requirement_ids]
     # A shared key is valid for an item of any requirement, and for multi-requirement items.
     last = str(snapshot.requirements[5].revision_id)
     shared_key = next(key for key, item in keys.items() if UUID(item.chunk_id).int == 701)

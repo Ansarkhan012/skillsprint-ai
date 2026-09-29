@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from .generation_context import input_hash
 from .generation_models import GenerationInputSnapshot, PreflightResult
 from .generation_output import OnboardingPlan
-from .generation_prompt import SOURCE_KEYS_PROMPT_VERSION, SourceKey, build_prompt, source_key_map
+from .generation_prompt import SOURCE_KEY_PROMPT_VERSIONS, SourceKey, build_prompt, source_key_map
 from .generation_provider import GenerationProvider, ProviderFailure
 from .rrm_rules import canonical_json
 
@@ -303,17 +303,18 @@ async def generate_unverified(
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     on_attempt: Callable[[AttemptTelemetry], Awaitable[None]] | None = None,
     source_keys: bool | None = None,
+    prompt_version: str | None = None,
 ) -> GenerationResult:
-    """source_keys=None reads GENERATION_SOURCE_KEYS; the API passes the reserved prompt's choice."""
+    """The API passes the reserved prompt_version; otherwise source_keys/GENERATION_SOURCE_KEYS decide."""
     if preflight.status != "READY" or preflight.snapshot is None or preflight.input_hash is None:
         return GenerationResult(status="BLOCKED", error_code=preflight.blocker_codes[0]
                                 if preflight.blocker_codes else "PREFLIGHT_BLOCKED")
     snapshot = preflight.snapshot
     if input_hash(snapshot) != preflight.input_hash:
         return GenerationResult(status="BLOCKED", error_code="INPUT_HASH_MISMATCH")
-    prompt = build_prompt(snapshot, request_id, source_keys)
+    prompt = build_prompt(snapshot, request_id, source_keys, version=prompt_version)
     # Derived from the same frozen snapshot as the prompt's evidence table; never live data.
-    keys = source_key_map(snapshot) if prompt.prompt_version == SOURCE_KEYS_PROMPT_VERSION else None
+    keys = source_key_map(snapshot) if prompt.prompt_version in SOURCE_KEY_PROMPT_VERSIONS else None
     if not prompt.within_budget:
         return GenerationResult(status="FAILED", error_code="GENERATION_PROJECTION_TOO_LARGE",
                                 input_hash=preflight.input_hash, prompt_version=prompt.prompt_version,

@@ -185,7 +185,11 @@ class GenerationLimits(BaseSettings):
 
 def capped_provider_schema(limits: GenerationLimits) -> dict:
     """Default provider schema plus maxItems/maxLength for the configured caps only."""
-    schema = provider_output_schema()
+    return _apply_caps(provider_output_schema(), limits)
+
+
+def _apply_caps(schema: dict, limits: GenerationLimits) -> dict:
+    """Tighten maxItems/maxLength on a fresh schema copy for the configured caps only."""
     module = schema["$defs"]["Module"]["properties"]
     for field, setting in _COMPACT_ARRAYS.items():
         if getattr(limits, setting) is not None:
@@ -216,15 +220,19 @@ def capped_provider_schema(limits: GenerationLimits) -> dict:
 def current_provider_schema(prompt_version: str | None = None, *, key_pattern: bool = True) -> dict:
     """Schema for the next provider request; re-reads .env like the provider settings.
 
-    Only the source-keys prompt (3.0.0) changes source_refs; every other version gets
-    exactly today's schema object.
+    2.0.0 gets exactly today's schema object and 3.0.0 exactly its historical key schema.
+    3.1.0 sends OnboardingPlan's own constraints to providers that accept JSON Schema
+    bounds and patterns (key_pattern=True: NaraRouter, Groq); direct Gemini, which
+    rejects them, keeps the relaxed key schema without `pattern`.
     """
     limits = GenerationLimits()
-    if all(getattr(limits, name) is None for name in GenerationLimits.model_fields):
-        schema = PROVIDER_OUTPUT_SCHEMA
-    else:
-        schema = capped_provider_schema(limits)
-    if prompt_version == SOURCE_KEYS_PROMPT_VERSION:
+    uncapped = all(getattr(limits, name) is None for name in GenerationLimits.model_fields)
+    if prompt_version == SOURCE_KEYS_V31_PROMPT_VERSION and key_pattern:
+        return source_key_provider_schema(strict_provider_schema() if uncapped
+                                          else _apply_caps(strict_provider_schema(), limits),
+                                          max_items=SOURCE_REFS_MAX_ITEMS)
+    schema = PROVIDER_OUTPUT_SCHEMA if uncapped else capped_provider_schema(limits)
+    if prompt_version in SOURCE_KEY_PROMPT_VERSIONS:
         return source_key_provider_schema(schema, key_pattern=key_pattern)
     return schema
 
@@ -302,7 +310,7 @@ def source_key_map(snapshot: GenerationInputSnapshot) -> dict[str, SourceKey]:
             for item in by_source.values()}
 
 
-def source_key_provider_schema(schema: dict, *, key_pattern: bool = True) -> dict:
+def source_key_provider_schema(schema: dict, *, key_pattern: bool = True, max_items: int | None = None) -> dict:
     """Copy of the provider schema with every source_refs as array[string], minItems 1.
 
     key_pattern=False for direct Gemini, which rejects `pattern`; Python expansion still
@@ -316,6 +324,8 @@ def source_key_provider_schema(schema: dict, *, key_pattern: bool = True) -> dic
             properties = node.get("properties")
             if isinstance(properties, dict) and "source_refs" in properties:
                 properties["source_refs"] = {"type": "array", "items": dict(items), "minItems": 1}
+                if max_items is not None:
+                    properties["source_refs"]["maxItems"] = max_items
             for value in node.values():
                 walk(value)
         elif isinstance(node, list):
@@ -326,6 +336,47 @@ def source_key_provider_schema(schema: dict, *, key_pattern: bool = True) -> dic
     if '"#/$defs/SourceRef"' not in json.dumps(schema):
         schema["$defs"].pop("SourceRef", None)
     return schema
+
+
+# --- 3.1.0: provider schema matches OnboardingPlan; explicit source ownership ----------
+SOURCE_KEYS_V31_PROMPT_VERSION = "phase4d-compact-context/3.1.0"
+SOURCE_KEYS_V31_PROJECTION_VERSION = "generation-projection/3.1.0"
+SOURCE_KEY_PROMPT_VERSIONS = frozenset({SOURCE_KEYS_PROMPT_VERSION, SOURCE_KEYS_V31_PROMPT_VERSION})
+SOURCE_REFS_MAX_ITEMS = 100  # generation_output.Sources max_length
+
+
+def _strict_schema(value: object) -> object:
+    """Like _provider_schema but keeps every bound/pattern OnboardingPlan declares."""
+    if isinstance(value, dict):
+        node = {}
+        for key, item in value.items():
+            if key == "const":
+                node["enum"] = [item]
+            elif key in ("$defs", "properties"):
+                node[key] = {name: _strict_schema(schema) for name, schema in item.items()}
+            else:
+                node[key] = _strict_schema(item)
+        if node.get("type") == "object" and "properties" in node:
+            node["required"] = sorted(node["properties"])
+        return node
+    if isinstance(value, list):
+        return [_strict_schema(item) for item in value]
+    return value
+
+
+def strict_provider_schema() -> dict:
+    """OnboardingPlan's JSON Schema (types, formats, enums, lengths, patterns, numeric and
+    item bounds, additionalProperties:false) with every key required, plus the existing
+    provider-only rule that modules carry learning content. Python-only rules (quiz
+    answers, rubric total, unique ids, identity/stage/source checks) stay in the prompt,
+    parse_plan and the validator.
+    """
+    schema = _strict_schema(_compact_schema(OnboardingPlan.model_json_schema()))
+    for field in MODULE_REQUIRED_CONTENT:
+        schema["$defs"]["Module"]["properties"][field]["minItems"] = 1
+    return schema
+
+
 OUTPUT_SPEC = canonical_json(compact_output_contract())
 OUTPUT_MAPPING = (
     "Copy projection.employee employee_id,role_id,department_id,location_code,joining_date to employee_context; "
@@ -360,6 +411,19 @@ SOURCE_KEYS_OUTPUT_MAPPING = OUTPUT_MAPPING.replace(_SOURCE_REFS_MAPPING, (
     "source_keys of that item's own requirement_ids; never invent, renumber or reuse keys from other requirements. "))
 SOURCE_KEYS_PROVIDER_RULES = (RULES + "\noutput_spec=" + SOURCE_KEYS_OUTPUT_SPEC
                               + "\noutput_mapping=" + SOURCE_KEYS_OUTPUT_MAPPING)
+_V31_SEMANTIC = ("Distinct UUIDs for generated nodes/options/rubric rows; correct_answer_ids reference own options; "
+                 "rubric weight_percent totals 100 per assessment. ")
+assert _V31_SEMANTIC in OUTPUT_MAPPING
+SOURCE_KEYS_V31_OUTPUT_MAPPING = OUTPUT_MAPPING.replace(_SOURCE_REFS_MAPPING, (
+    "source_refs: only S# keys from allowed_sources of the item's own requirement_ids (any of them if several); "
+    "a key merely present in evidence is never allowed. ")).replace(_V31_SEMANTIC, (
+    "Rules the schema cannot check: every grounded item has >=1 requirement_ids; every generated id "
+    "(module, objective, concept, activity, checklist item, task, scenario, quiz, option, assessment, rubric row, "
+    "criterion) is a new UUID used once in the whole plan; correct_answer_ids are option_ids of the same quiz; "
+    "rubric weight_percent sums to exactly 100 per assessment; due_stage_id is a plan stage_id; "
+    "prerequisite_module_ids are module_ids in this plan; no blank text. "))
+SOURCE_KEYS_V31_PROVIDER_RULES = (RULES + "\noutput_spec=" + SOURCE_KEYS_OUTPUT_SPEC
+                                  + "\noutput_mapping=" + SOURCE_KEYS_V31_OUTPUT_MAPPING)
 
 
 class PromptPack(BaseModel):
@@ -379,12 +443,14 @@ class PromptPack(BaseModel):
     untrusted_data: str
 
 
-def _template_hash(prompt_version: str, rules: str, projection_version: str) -> str:
+def _template_hash(prompt_version: str, rules: str, projection_version: str, provider_schema: str = "") -> str:
+    # provider_schema is appended only from 3.1.0 on, so 2.0.0/3.0.0 hashes are unchanged.
     return sha256((prompt_version + "\n" + SCHEMA_VERSION + "\n" + SYSTEM + "\n" + rules
                    + "\n" + FORMAT_RETRY_RULE + "\n" + projection_version
                    + "\n" + str(MAX_PROJECTION_BYTES) + "\n"
                    + str(MAX_PROVIDER_INPUT_BYTES) + "\n"
-                   + str(MAX_PROVIDER_REQUEST_BYTES)).encode("utf-8")).hexdigest()
+                   + str(MAX_PROVIDER_REQUEST_BYTES)
+                   + ("\n" + provider_schema if provider_schema else "")).encode("utf-8")).hexdigest()
 
 
 def template_hash() -> str:
@@ -393,6 +459,13 @@ def template_hash() -> str:
 
 def source_keys_template_hash() -> str:
     return _template_hash(SOURCE_KEYS_PROMPT_VERSION, SOURCE_KEYS_PROVIDER_RULES, SOURCE_KEYS_PROJECTION_VERSION)
+
+
+def source_keys_v31_template_hash() -> str:
+    """Also binds the uncapped strict provider schema, so a schema change needs a new version."""
+    schema = source_key_provider_schema(strict_provider_schema(), max_items=SOURCE_REFS_MAX_ITEMS)
+    return _template_hash(SOURCE_KEYS_V31_PROMPT_VERSION, SOURCE_KEYS_V31_PROVIDER_RULES,
+                          SOURCE_KEYS_V31_PROJECTION_VERSION, canonical_json(schema))
 
 
 def generation_projection(snapshot: GenerationInputSnapshot) -> dict:
@@ -431,34 +504,56 @@ def generation_projection(snapshot: GenerationInputSnapshot) -> dict:
     }
 
 
-def source_key_projection(snapshot: GenerationInputSnapshot, keys: dict[str, SourceKey]) -> dict:
-    """The 2.0.0 projection with per-requirement source_keys and one shared evidence table."""
+def source_key_projection(snapshot: GenerationInputSnapshot, keys: dict[str, SourceKey],
+                          version: str = SOURCE_KEYS_PROMPT_VERSION) -> dict:
+    """The 2.0.0 projection with per-requirement keys and one shared evidence table.
+
+    3.0.0 names the per-requirement list source_keys (in evidence order); 3.1.0 names it
+    allowed_sources and lists every key that requirement may cite, in key order.
+    """
     projection = generation_projection(snapshot)
-    projection["projection_version"] = SOURCE_KEYS_PROJECTION_VERSION
     by_source = {(item.document_version_id, item.chunk_id, item.locator): key for key, item in keys.items()}
-    for requirement in projection["requirements"]:
-        requirement["source_keys"] = [by_source[(ref["document_version_id"], ref["chunk_id"], ref["locator"])]
-                                      for ref in requirement.pop("source_refs")]
+    if version == SOURCE_KEYS_V31_PROMPT_VERSION:
+        projection["projection_version"] = SOURCE_KEYS_V31_PROJECTION_VERSION
+        for requirement in projection["requirements"]:
+            requirement.pop("source_refs")
+            requirement["allowed_sources"] = [key for key, item in keys.items()
+                                              if requirement["revision_id"] in item.requirement_ids]
+    else:
+        projection["projection_version"] = SOURCE_KEYS_PROJECTION_VERSION
+        for requirement in projection["requirements"]:
+            requirement["source_keys"] = [by_source[(ref["document_version_id"], ref["chunk_id"], ref["locator"])]
+                                          for ref in requirement.pop("source_refs")]
     projection["evidence"] = [f"{key} -> {item.document_label} | {item.section} | {item.excerpt}"
                               for key, item in keys.items()]
     return projection
 
 
 def build_prompt(snapshot: GenerationInputSnapshot, request_id: UUID | None = None,
-                 source_keys: bool | None = None) -> PromptPack:
-    """source_keys=None reads GENERATION_SOURCE_KEYS; false keeps the 2.0.0 prompt byte-for-byte."""
-    if source_keys is None:
-        source_keys = source_keys_enabled()
+                 source_keys: bool | None = None, *, version: str | None = None) -> PromptPack:
+    """source_keys=None reads GENERATION_SOURCE_KEYS; false keeps the 2.0.0 prompt byte-for-byte.
+
+    Source keys select the current key contract (3.1.0). An explicit version rebuilds a
+    reviewed historical contract (2.0.0, 3.0.0 or 3.1.0) exactly.
+    """
+    if version is None:
+        if source_keys is None:
+            source_keys = source_keys_enabled()
+        version = SOURCE_KEYS_V31_PROMPT_VERSION if source_keys else PROMPT_VERSION
+    if version not in (PROMPT_VERSION, *SOURCE_KEY_PROMPT_VERSIONS):
+        raise ValueError("UNKNOWN_PROMPT_VERSION")
     # Escape markup sentinels inside source text; provider role separation is the primary boundary.
     projection = generation_projection(snapshot)
     # Locator length is checked on the frozen references in both modes: keys expand to them.
     locators_fit = all(len(ref["locator"]) <= 240 for req in projection["requirements"]
                        for ref in req["source_refs"])
-    version, rules, template = PROMPT_VERSION, PROVIDER_RULES, template_hash()
-    if source_keys:
-        projection = source_key_projection(snapshot, source_key_map(snapshot))
-        version, rules, template = (SOURCE_KEYS_PROMPT_VERSION, SOURCE_KEYS_PROVIDER_RULES,
-                                    source_keys_template_hash())
+    rules, template = PROVIDER_RULES, template_hash()
+    if version == SOURCE_KEYS_PROMPT_VERSION:
+        projection = source_key_projection(snapshot, source_key_map(snapshot), version)
+        rules, template = SOURCE_KEYS_PROVIDER_RULES, source_keys_template_hash()
+    elif version == SOURCE_KEYS_V31_PROMPT_VERSION:
+        projection = source_key_projection(snapshot, source_key_map(snapshot), version)
+        rules, template = SOURCE_KEYS_V31_PROVIDER_RULES, source_keys_v31_template_hash()
     raw = canonical_json(projection)
     data = raw.replace("<", "\\u003c").replace(">", "\\u003e")
     size = len(data.encode("utf-8"))
