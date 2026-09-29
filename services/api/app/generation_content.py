@@ -21,10 +21,15 @@ from .generation_models import GenerationInputSnapshot
 from .rrm_rules import canonical_json
 
 CONTENT_V400 = "phase4d-content-only/4.0.0"   # historical; reproducible, never live-selected
-CONTENT_V401 = "phase4d-content-only/4.0.1"   # current intended live contract
-CURRENT_CONTENT_VERSION = CONTENT_V401
-CONTENT_PROMPT_VERSIONS = frozenset({CONTENT_V400, CONTENT_V401})
-CONTENT_PROJECTION_VERSION = "generation-content/4.0.0"  # the projection is unchanged in 4.0.1
+CONTENT_V401 = "phase4d-content-only/4.0.1"   # historical; reproducible, never live-selected
+CONTENT_V410 = "phase4d-content-only/4.1.0"   # current intended live contract (demo-minimal)
+CURRENT_CONTENT_VERSION = CONTENT_V410
+CONTENT_PROMPT_VERSIONS = frozenset({CONTENT_V400, CONTENT_V401, CONTENT_V410})
+CONTENT_PROJECTION_VERSION = "generation-content/4.0.0"  # 4.0.0 and 4.0.1 projection
+CONTENT_PROJECTION_VERSIONS = {CONTENT_V400: CONTENT_PROJECTION_VERSION, CONTENT_V401: CONTENT_PROJECTION_VERSION,
+                               CONTENT_V410: "generation-content/4.1.0"}
+# 4.1.0: fields the model no longer writes are filled by Python from trusted requirement data.
+DEFAULT_MODULE_MINUTES = 30  # backend default estimate; not a policy fact
 OUTPUT_SCHEMA_VERSION = "onboarding-plan/1.0.0"
 QUIZ_OPTION_COUNT = 3
 # Fixed namespace for backend-assigned ids; changing it changes every generated id.
@@ -106,8 +111,68 @@ class ContentResponseV400(BaseModel):
     requirements: dict[str, RequirementContentV400]
 
 
-CONTENT_ITEM_MODELS = {CONTENT_V400: RequirementContentV400, CONTENT_V401: RequirementContent}
-CONTENT_RESPONSE_MODELS = {CONTENT_V400: ContentResponseV400, CONTENT_V401: ContentResponse}
+def _text(max_length: int):
+    return Annotated[str, Field(min_length=1, max_length=max_length, pattern=r"\S")]
+
+
+class RequirementContentV410(BaseModel):
+    """4.1.0: the smallest useful per-requirement content, 7 fields, all required.
+
+    The provider JSON schema is generated from this model (identical bounds). Limits are short
+    on purpose and all within OnboardingPlan's ShortText/Text bounds. The one rule JSON Schema
+    cannot express exactly: options must differ ignoring case and spacing (the schema carries
+    uniqueItems for exact duplicates); a quiz with repeated options has no well-defined answer.
+    """
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    module_title: _text(120)                                   # -> Module.title
+    objective: _text(400)                                      # -> Objective.statement
+    task: _text(400)                                           # -> Task.description
+    checklist: _text(240)                                      # -> ChecklistItem.activity
+    quiz_question: _text(400)                                  # -> Quiz.question
+    quiz_options: tuple[_text(160), ...] = Field(min_length=QUIZ_OPTION_COUNT, max_length=QUIZ_OPTION_COUNT,
+                                                 json_schema_extra={"uniqueItems": True})
+    correct_option_index: int = Field(ge=0, le=QUIZ_OPTION_COUNT - 1)
+
+    @model_validator(mode="after")
+    def distinct_options(self):
+        _distinct_options(self.quiz_options)
+        return self
+
+
+class ContentResponseV410(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    plan_title: _text(120)                                     # -> Plan.title
+    requirements: dict[str, RequirementContentV410]
+
+
+CONTENT_ITEM_MODELS = {CONTENT_V400: RequirementContentV400, CONTENT_V401: RequirementContent,
+                       CONTENT_V410: RequirementContentV410}
+CONTENT_RESPONSE_MODELS = {CONTENT_V400: ContentResponseV400, CONTENT_V401: ContentResponse,
+                           CONTENT_V410: ContentResponseV410}
+
+
+def _module_text(item, req) -> dict:
+    """Uniform module prose. 4.0.x items carry every field; for 4.1.0 the fields the model no
+    longer writes are derived deterministically from the approved requirement (no new facts)."""
+    if isinstance(item, RequirementContentV410):
+        return {"title": item.module_title, "purpose": req.statement[:4000], "minutes": DEFAULT_MODULE_MINUTES,
+                "objective": item.objective, "task": item.task,
+                "expected_outcome": f"Requirement {req.code} is completed and recorded.",
+                "criteria": [f"Completion of {req.code} is recorded"], "checklist": item.checklist,
+                "question": item.quiz_question, "options": item.quiz_options, "index": item.correct_option_index,
+                "explanation": f"The correct option follows approved requirement {req.code}."}
+    return {"title": item.module_title, "purpose": item.module_purpose, "minutes": item.estimated_minutes,
+            "objective": item.objective, "task": item.task_description, "expected_outcome": item.task_expected_outcome,
+            "criteria": list(item.task_completion_criteria), "checklist": item.checklist_activity,
+            "question": item.quiz_question, "options": item.quiz_options, "index": item.correct_option_index,
+            "explanation": item.quiz_explanation}
+
+
+def plan_summary(content, snapshot: GenerationInputSnapshot) -> str:
+    if hasattr(content, "plan_summary"):
+        return content.plan_summary
+    return (f"Onboarding plan for role {snapshot.employee.role_code} covering "
+            f"{len(snapshot.requirements)} approved requirements across {len(snapshot.stage_set.items)} stages.")
 
 
 def requirement_keys(snapshot: GenerationInputSnapshot) -> dict[str, object]:
@@ -178,34 +243,34 @@ def assemble_plan(content: ContentResponse, snapshot: GenerationInputSnapshot, r
     for stage, requirements in zip(snapshot.stage_set.items, module_layout(snapshot)):
         modules = []
         for req in requirements:
-            text = content.requirements[keys[req.revision_id]]
+            text = _module_text(content.requirements[keys[req.revision_id]], req)
             rid, owner = str(req.revision_id), req.revision_id
             grounded = {"requirement_ids": [rid], "source_refs": source_refs(req)}
             stage_id = str(stage.stage_definition_id)
             option_ids = [generated_id(request_id, owner, "quiz_option", n) for n in range(QUIZ_OPTION_COUNT)]
             modules.append({
-                **grounded, "module_id": module_ids[owner], "title": text.module_title,
-                "purpose": text.module_purpose, "category": req.obligation_type.replace("_", " ").title(),
+                **grounded, "module_id": module_ids[owner], "title": text["title"],
+                "purpose": text["purpose"], "category": req.obligation_type.replace("_", " ").title(),
                 "mandatory": req.mandatory, "priority": req.priority, "difficulty": experience,
-                "estimated_minutes": text.estimated_minutes,
+                "estimated_minutes": text["minutes"],
                 "prerequisite_module_ids": [module_ids[p] for d, p in snapshot.dependencies
                                             if d == owner and p in module_ids],
                 "learning_objectives": [{**grounded, "objective_id": generated_id(request_id, owner, "objective"),
-                                         "statement": text.objective}],
+                                         "statement": text["objective"]}],
                 "key_concepts": [], "activities": [], "scenarios": [], "assessments": [], "completion_criteria": [],
                 "checklist_items": [{**grounded, "checklist_item_id": generated_id(request_id, owner, "checklist"),
-                                     "activity": text.checklist_activity, "required": req.mandatory,
+                                     "activity": text["checklist"], "required": req.mandatory,
                                      "due_stage_id": stage_id, "responsible_role": "Employee"}],
                 "tasks": [{**grounded, "task_id": generated_id(request_id, owner, "task"),
-                           "description": text.task_description, "expected_outcome": text.task_expected_outcome,
-                           "completion_criteria": list(text.task_completion_criteria),
+                           "description": text["task"], "expected_outcome": text["expected_outcome"],
+                           "completion_criteria": list(text["criteria"]),
                            "difficulty": experience, "due_stage_id": stage_id}],
                 "quizzes": [{**grounded, "quiz_id": generated_id(request_id, owner, "quiz"),
-                             "question_type": "SINGLE_CHOICE", "question": text.quiz_question,
+                             "question_type": "SINGLE_CHOICE", "question": text["question"],
                              "options": [{"option_id": option_id, "text": option}
-                                         for option_id, option in zip(option_ids, text.quiz_options)],
-                             "correct_answer_ids": [option_ids[text.correct_option_index]],
-                             "explanation": text.quiz_explanation, "difficulty": experience}]})
+                                         for option_id, option in zip(option_ids, text["options"])],
+                             "correct_answer_ids": [option_ids[text["index"]]],
+                             "explanation": text["explanation"], "difficulty": experience}]})
         stages.append({"stage_id": str(stage.stage_definition_id), "label": stage.label, "sequence": stage.sequence,
                        "target_start_day": stage.start_day, "target_end_day": stage.end_day, "modules": modules})
     employee = snapshot.employee
@@ -214,5 +279,5 @@ def assemble_plan(content: ContentResponse, snapshot: GenerationInputSnapshot, r
                                  "department_id": str(employee.department_id), "experience_level": experience,
                                  "location_code": employee.location_code,
                                  "joining_date": employee.joining_date.isoformat()},
-            "plan": {"title": content.plan_title, "summary": content.plan_summary, "stages": stages},
+            "plan": {"title": content.plan_title, "summary": plan_summary(content, snapshot), "stages": stages},
             "insufficient_information": []}

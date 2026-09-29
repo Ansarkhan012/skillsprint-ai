@@ -43,6 +43,8 @@ _SAFE_FIELD_NAMES = frozenset({
     "plan_title", "plan_summary", "requirements", "module_title", "module_purpose", "objective",
     "task_description", "task_expected_outcome", "task_completion_criteria", "checklist_activity",
     "quiz_question", "quiz_options", "correct_option_index", "quiz_explanation",
+    # 4.1.0 content-only response
+    "task", "checklist",
 })
 # Backend-issued requirement keys (R1..Rn) in 4.0.0 content paths are safe to report.
 _REQUIREMENT_KEY = re.compile(r"R[0-9]{1,4}")

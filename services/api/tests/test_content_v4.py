@@ -13,7 +13,7 @@ import pytest
 from pydantic import SecretStr
 
 # This module pins the historical 4.0.0 contract; 4.0.1 (current) is covered in test_readiness.py.
-from app.generation_content import (CONTENT_V400 as CONTENT_PROMPT_VERSION, CONTENT_V401, ID_NAMESPACE, assemble_plan,
+from app.generation_content import (CONTENT_V400 as CONTENT_PROMPT_VERSION, CONTENT_V410, ID_NAMESPACE, assemble_plan,
                                     generated_id, module_layout, requirement_keys, source_refs,
                                     ContentResponseV400 as ContentResponse)
 from app.generation_context import input_hash
@@ -36,7 +36,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 MIGRATIONS = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
 RUN = UUID("aaccc0b5-e109-432e-88ae-805acd35d96a")
 V4_HASH = "d0f338ed27b47e91207d3346fad2b0055f955960b258874804e9b17db8503b43"
-V401_HASH = "83c231d9c9647da559d57e6ece4680ef8f8902c6e38c1e484ae59888eb91b00a"
+V410_HASH = "f4edf5d50196fe8d4635a95cef1164bbd85215f31f90f58aa08390fed8c6d5fa"
 UUID_TEXT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
 
@@ -394,8 +394,8 @@ def test_groq_and_gemini_send_the_v4_content_schema():
 
 def test_flags_select_versions_and_historical_identities_are_unchanged(monkeypatch):
     frozen = snapshot()
-    for content_only, source_keys, expected in (("true", "false", (CONTENT_V401, V401_HASH)),
-                                                ("true", "true", (CONTENT_V401, V401_HASH)),
+    for content_only, source_keys, expected in (("true", "false", (CONTENT_V410, V410_HASH)),
+                                                ("true", "true", (CONTENT_V410, V410_HASH)),
                                                 ("false", "true", (SOURCE_KEYS_V31_PROMPT_VERSION, V31_HASH)),
                                                 ("false", "false", (PROMPT_VERSION, V2_HASH))):
         monkeypatch.setenv("GENERATION_CONTENT_ONLY", content_only)
@@ -451,9 +451,9 @@ def test_api_reserves_v4_and_persists_an_assembled_plan(monkeypatch):
         async def generate(self, prompt, *, format_retry=False):
             self.prompts.append(prompt)
             keys = [key for key in prompt.response_schema["properties"]["requirements"]["properties"]]
-            item = content()["requirements"]["R1"]
-            return ProviderResult(text=json.dumps({"plan_title": "Plan", "plan_summary": "Summary.",
-                                                   "requirements": {key: item for key in keys}}),
+            item = json.loads((FIXTURES / "phase4d_v410_model_content_response.json").read_text(
+                encoding="utf-8"))["requirements"]["R1"]
+            return ProviderResult(text=json.dumps({"plan_title": "Plan", "requirements": {key: item for key in keys}}),
                                   finish_reason="STOP")
     provider = Provider()
     config = ProviderConfig(model="test-model", api_key=SecretStr("test-only-placeholder"))
@@ -467,7 +467,7 @@ def test_api_reserves_v4_and_persists_an_assembled_plan(monkeypatch):
     finally:
         app.dependency_overrides.clear()
     reserve = next(payload for name, payload in store.calls if name == "reserve")
-    assert (reserve["p_prompt_version"], reserve["p_template_hash"]) == (CONTENT_V401, V401_HASH)
-    assert provider.prompts[0].prompt_version == CONTENT_V401  # reserved == executed
+    assert (reserve["p_prompt_version"], reserve["p_template_hash"]) == (CONTENT_V410, V410_HASH)
+    assert provider.prompts[0].prompt_version == CONTENT_V410  # reserved == executed
     assert store.status in ("UNVERIFIED", "STALE_INPUT") and store.last_finish[1]["schema_version"] == \
         "onboarding-plan/1.0.0"

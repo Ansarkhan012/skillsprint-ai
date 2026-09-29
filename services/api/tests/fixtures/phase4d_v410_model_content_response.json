@@ -1,0 +1,59 @@
+{
+  "plan_title": "Engineer onboarding – first week",
+  "requirements": {
+    "R5": {
+      "module_title": "Acknowledge company policies",
+      "objective": "Know which policies apply to you and confirm you have read them.",
+      "task": "Read each required policy and submit the acknowledgement form.",
+      "checklist": "Policy acknowledgement submitted within 1 day of joining",
+      "quiz_question": "How soon must you acknowledge the required policies?",
+      "quiz_options": ["Within 1 day of joining", "Within your first month", "Only if a manager asks"],
+      "correct_option_index": 0
+    },
+    "R4": {
+      "module_title": "Security awareness",
+      "objective": "Recognise common security risks and report them the right way.",
+      "task": "Complete the security awareness training and its short check.",
+      "checklist": "Security awareness training done within 2 days of joining",
+      "quiz_question": "What should you do with a suspicious login request?",
+      "quiz_options": ["Click the link to check it", "Report it and don’t click", "Forward it to your team"],
+      "correct_option_index": 1
+    },
+    "R1": {
+      "module_title": "Workstation & sandbox setup",
+      "objective": "Set up the approved workstation and a sandbox you can safely build and test in.",
+      "task": "Install the approved image, request sandbox access and run the sample build.",
+      "checklist": "Workstation and sandbox ready within 2 days of joining",
+      "quiz_question": "Where should onboarding code run?",
+      "quiz_options": ["On production servers", "On a personal laptop", "In the approved sandbox"],
+      "correct_option_index": 2
+    },
+    "R2": {
+      "module_title": "Secure coding",
+      "objective": "Apply the required secure coding practices when writing and reviewing code.",
+      "task": "Finish the secure coding course, then fix the seeded issues in the sandbox exercise.",
+      "checklist": "Secure coding training completed within 5 days of joining",
+      "quiz_question": "Which modules come before secure coding?",
+      "quiz_options": ["Workstation setup and security awareness", "The final assessment", "None"],
+      "correct_option_index": 0
+    },
+    "R3": {
+      "module_title": "Repository workflow — hands-on",
+      "objective": "Use the approved branch, review and merge workflow on a real change.",
+      "task": "Make a small change on a branch, get it reviewed and merge it by the workflow.",
+      "checklist": "Repository workflow demonstrated within 6 days of joining",
+      "quiz_question": "What completes this requirement?",
+      "quiz_options": ["Reading the guide", "Demonstrating it on a reviewed change", "Watching a demo"],
+      "correct_option_index": 1
+    },
+    "R6": {
+      "module_title": "Final onboarding assessment",
+      "objective": "Show you are ready to work independently after onboarding.",
+      "task": "Take the final assessment once every other module is complete.",
+      "checklist": "Final assessment taken within 7 days of joining",
+      "quiz_question": "When can the final assessment be taken?",
+      "quiz_options": ["On day one", "After all other modules", "After 30 days"],
+      "correct_option_index": 1
+    }
+  }
+}

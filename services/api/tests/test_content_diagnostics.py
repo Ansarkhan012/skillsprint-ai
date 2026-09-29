@@ -140,7 +140,7 @@ def test_each_realistic_mistake_is_rejected_at_its_layer_with_a_safe_actionable_
         caplog, monkeypatch, name, text, schema_rejects, code, layer, first):
     monkeypatch.setenv("GENERATION_CONTENT_ONLY", "true")
     frozen = snapshot(with_canary=True)
-    schema = build_prompt(frozen, RUN).response_schema
+    schema = build_prompt(frozen, RUN, version=CONTENT_V401).response_schema  # this module pins 4.0.1
     try:
         decoded = json.loads(text)
     except ValueError:

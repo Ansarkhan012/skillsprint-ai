@@ -14,7 +14,7 @@ The pipeline step uses an in-process stand-in that returns the supplied fixture 
 Without --snapshot it performs a read-only preflight against Supabase using the operator's
 own access token (SKILLSPRINT_ACCESS_TOKEN); it never writes to the database.
 
-Final line and exit code: READY_FOR_LIVE_GENERATION (0), DB_VERIFICATION_REQUIRED (2) or
+Final line and exit code: READY_FOR_ONE_CONTROLLED_LIVE_GENERATION (0), DB_VERIFICATION_REQUIRED (2) or
 BLOCKED: <step> — <reason> (1).
 """
 
@@ -35,13 +35,15 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 import httpx
 from dotenv import dotenv_values
 
-from .generation_content import (CONTENT_PROMPT_VERSIONS, CONTENT_V400, CONTENT_V401, CURRENT_CONTENT_VERSION,
+from .generation_content import (CONTENT_PROMPT_VERSIONS, CONTENT_RESPONSE_MODELS, CONTENT_V400, CONTENT_V401,
+                                 CONTENT_V410, CURRENT_CONTENT_VERSION,
                                  module_layout, requirement_keys, source_refs)
 from .generation_context import input_hash
 from .generation_models import GenerationInputSnapshot, PreflightResult
 from .generation_output import OnboardingPlan
 from .generation_prompt import (MAX_PROVIDER_REQUEST_BYTES, SCHEMA_VERSION, GenerationLimits, SourceKeySettings,
-                                build_prompt, content_template_hash, provider_schema_for, selected_prompt_version)
+                                _compact_schema, _strict_schema, build_prompt, content_response_schema,
+                                content_template_hash, provider_schema_for, selected_prompt_version)
 from .generation_provider import (GeminiEnvironment, GroqEnvironment, ProviderFailure, ProviderResult,
                                   groq_request_payload, json_schema_response_format)
 from .generation_service import assemble_content, generate_unverified, structural_retry_window
@@ -52,10 +54,11 @@ from .rrm_models import EmployeeContext
 from .rrm_rules import applicability, snapshot_hash
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "phase4d_v401_model_content_response.json"
+DEFAULT_FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "phase4d_v410_model_content_response.json"
 # Deterministic dry-run request id; never reserved in the database.
 DRY_RUN_ID = uuid5(NAMESPACE_URL, "skillsprint-ai/generation-readiness/dry-run")
-PROJECTION_CONSTRAINTS = {CONTENT_V400: "generation_runs_content_v4_projection_check",
+PROJECTION_CONSTRAINTS = {CONTENT_V410: "generation_runs_content_v410_projection_check",
+                          CONTENT_V400: "generation_runs_content_v4_projection_check",
                           CONTENT_V401: "generation_runs_content_v401_projection_check"}
 ALLOWED_INPUT_WARNINGS = {("TIMING_UNRESOLVED", "WARNING", "input.timing")}
 FINISH_MAX_PLAN_BYTES = 4_194_304
@@ -74,7 +77,7 @@ class Blocked(Exception):
 
 @dataclass
 class GateResult:
-    status: str                      # READY_FOR_LIVE_GENERATION | DB_VERIFICATION_REQUIRED | BLOCKED
+    status: str                      # READY_FOR_ONE_CONTROLLED_LIVE_GENERATION | DB_VERIFICATION_REQUIRED | BLOCKED
     final_line: str
     lines: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -378,6 +381,15 @@ def check_prompt(report: _Report, snapshot: GenerationInputSnapshot, version: st
         delegated.append("<uuid in model input>")
     if delegated:
         raise Blocked("C. prompt identity", f"backend-owned fields delegated to the model: {', '.join(delegated)}")
+    if version == CONTENT_V410:
+        model_schema = _strict_schema(_compact_schema(CONTENT_RESPONSE_MODELS[version].model_json_schema()))
+        if (schema != content_response_schema(expected_keys, None, version=version)
+                or schema.get("$defs") != model_schema.get("$defs")
+                or {k: v for k, v in schema["properties"].items() if k != "requirements"}
+                != {k: v for k, v in model_schema["properties"].items() if k != "requirements"}
+                or schema.get("required") != model_schema.get("required")):
+            raise Blocked("C. prompt identity", "provider schema differs from the Pydantic content model")
+        report.item("provider schema == Pydantic model", "identical (fields, required, bounds, additionalProperties)")
     report.item("model-generated mechanical fields", "none (no ids, stages, requirement mappings, sources, "
                                                      "dependencies, identity, request id, mandatory/priority)")
     report.facts.update(template_hash=executed.template_hash, projection_hash=executed.projection_hash)
@@ -460,7 +472,30 @@ def check_database(report: _Report, db_path: Path | None, version: str, template
 
 # --------------------------------------------------------------------------- E. request measurement
 
-def measure_request(report: _Report, prompt, provider: str, config) -> None:
+_COMPARISON: dict = {}
+
+
+def build_prompt_for_comparison(prompt) -> int | None:
+    return _COMPARISON.get("v401_request_bytes")
+
+
+def _request_bytes(prompt, provider: str, config) -> int:
+    if provider == "nararouter":
+        payload = nararouter_request_payload(prompt, config)
+        full = {**payload, "response_format": json_schema_response_format(provider_schema_for(prompt))}
+    elif provider == "groq":
+        payload = groq_request_payload(prompt, config)
+        full = {**payload, "response_format": json_schema_response_format(provider_schema_for(prompt))}
+    else:
+        full = {"system": prompt.system + "\n" + prompt.rules, "user": prompt.untrusted_data,
+                "schema": provider_schema_for(prompt, key_pattern=False)}
+    return len(httpx.Request("POST", "https://readiness.invalid", json=full).content)
+
+
+def measure_request(report: _Report, prompt, provider: str, config, snapshot=None) -> None:
+    if snapshot is not None and prompt.prompt_version == CONTENT_V410:
+        _COMPARISON["v401_request_bytes"] = _request_bytes(build_prompt(snapshot, DRY_RUN_ID, version=CONTENT_V401),
+                                                           provider, config)
     report.section("E. Exact provider request (built, never sent)")
     if provider == "nararouter":
         payload = nararouter_request_payload(prompt, config)
@@ -503,6 +538,13 @@ def measure_request(report: _Report, prompt, provider: str, config) -> None:
         report.warn(f"input is large (~{total // 4} tokens)")
     if depth > 4:
         report.warn(f"response schema nesting depth {depth} exceeds the content-only design (3)")
+    if prompt.prompt_version == CONTENT_V410:
+        previous = build_prompt_for_comparison(prompt)
+        if previous is not None:
+            ratio = total / previous
+            report.item("vs 4.0.1 request bytes", f"{total} vs {previous} ({100 * (1 - ratio):.0f}% smaller)")
+            if ratio > 0.85:
+                raise Blocked("E. request", f"4.1.0 request is not materially smaller than 4.0.1 ({total} vs {previous})")
     report.facts.update(request_bytes=total, schema_bytes=schema_bytes, input_tokens=total // 4,
                         schema_properties=properties, schema_depth=depth)
 
@@ -542,7 +584,8 @@ def _captured(function):
 
 
 def adversarial_variants(fixture: dict) -> list[tuple[str, str, str]]:
-    """(name, response text, expected failure code). Each carries a canary that must never be logged."""
+    """Realistic small-model mistakes against the 4.1.0 content contract:
+    (name, response text, expected failure code). Each carries a canary that must never be logged."""
     def variant(change):
         data = json.loads(json.dumps(fixture))
         first = next(iter(data["requirements"]))
@@ -551,50 +594,43 @@ def adversarial_variants(fixture: dict) -> list[tuple[str, str, str]]:
         return json.dumps(data)
 
     keys = list(fixture["requirements"])
-    duplicate = ('{"plan_title": "' + CANARY + '", "plan_summary": "x", "requirements": {'
+    duplicate = ('{"plan_title": "' + CANARY + '", "requirements": {'
                  + ", ".join(f'"{key}": {json.dumps(value)}' for key, value in fixture["requirements"].items())
                  + f', "{keys[0]}": {json.dumps(fixture["requirements"][keys[0]])}' + "}}")
     return [
         ("missing requirement key", variant(lambda d, k: d["requirements"].pop(keys[-1])), "SCHEMA_INVALID"),
+        ("only one requirement entry", variant(lambda d, k: d.update(requirements={k: d["requirements"][k]})),
+         "SCHEMA_INVALID"),
         ("duplicate requirement key", duplicate, "MALFORMED_JSON"),
         ("unknown R#", variant(lambda d, k: d["requirements"].update({"R999": d["requirements"][k]})),
          "SCHEMA_INVALID"),
+        ("missing objective", variant(lambda d, k: d["requirements"][k].pop("objective")), "SCHEMA_INVALID"),
+        ("empty string", variant(lambda d, k: d["requirements"][k].update(task="")), "SCHEMA_INVALID"),
         ("blank title", variant(lambda d, k: d["requirements"][k].update(module_title="   ")), "SCHEMA_INVALID"),
-        ("blank objective", variant(lambda d, k: d["requirements"][k].update(objective=" \t ")), "SCHEMA_INVALID"),
-        ("invalid estimated minutes", variant(lambda d, k: d["requirements"][k].update(estimated_minutes=0)),
+        ("text too long", variant(lambda d, k: d["requirements"][k].update(module_title=CANARY * 10)),
          "SCHEMA_INVALID"),
-        ("one quiz option", variant(lambda d, k: d["requirements"][k].update(quiz_options=[CANARY])),
+        ("wrong type", variant(lambda d, k: d["requirements"][k].update(checklist=[CANARY])), "SCHEMA_INVALID"),
+        ("null field", variant(lambda d, k: d["requirements"][k].update(quiz_question=None)), "SCHEMA_INVALID"),
+        ("quiz with 2 options", variant(lambda d, k: d["requirements"][k].update(quiz_options=[CANARY, "b"])),
+         "SCHEMA_INVALID"),
+        ("quiz with 4 options", variant(lambda d, k: d["requirements"][k].update(quiz_options=[CANARY, "b", "c", "d"])),
          "SCHEMA_INVALID"),
         ("duplicate quiz options", variant(lambda d, k: d["requirements"][k].update(
             quiz_options=[CANARY, CANARY.lower() + " ", "Other"])), "SCHEMA_INVALID"),
         ("invalid correct index", variant(lambda d, k: d["requirements"][k].update(correct_option_index=3)),
          "SCHEMA_INVALID"),
-        ("malformed JSON", variant(lambda d, k: None)[:-7], "MALFORMED_JSON"),
-        ("extra property (model-supplied id)", variant(lambda d, k: d["requirements"][k].update(
-            module_id=CANARY)), "SCHEMA_INVALID"),
+        ("index as string", variant(lambda d, k: d["requirements"][k].update(correct_option_index="1")),
+         "SCHEMA_INVALID"),
+        ("extra field (model-supplied id)", variant(lambda d, k: d["requirements"][k].update(module_id=CANARY)),
+         "SCHEMA_INVALID"),
+        ("removed 4.0.1 field returned", variant(lambda d, k: d["requirements"][k].update(quiz_explanation=CANARY)),
+         "SCHEMA_INVALID"),
         ("model-supplied stage structure", variant(lambda d, k: d.update(stages=[CANARY])), "SCHEMA_INVALID"),
-        ("requirement missing one field", variant(lambda d, k: d["requirements"][k].pop("quiz_explanation")),
-         "SCHEMA_INVALID"),
-        ("null where string expected", variant(lambda d, k: d["requirements"][k].update(task_description=None)),
-         "SCHEMA_INVALID"),
-        ("null where list expected", variant(lambda d, k: d["requirements"][k].update(quiz_options=None)),
-         "SCHEMA_INVALID"),
-        ("string over max length", variant(lambda d, k: d["requirements"][k].update(module_title=CANARY * 20)),
-         "SCHEMA_INVALID"),
-        ("too many completion criteria", variant(lambda d, k: d["requirements"][k].update(
-            task_completion_criteria=[CANARY] * 21)), "SCHEMA_INVALID"),
-        ("two quiz options", variant(lambda d, k: d["requirements"][k].update(quiz_options=[CANARY, "b"])),
-         "SCHEMA_INVALID"),
-        ("four quiz options", variant(lambda d, k: d["requirements"][k].update(quiz_options=[CANARY, "b", "c", "d"])),
-         "SCHEMA_INVALID"),
-        ("nested quiz object", variant(lambda d, k: d["requirements"][k].update(
-            quiz={"question": CANARY}) or [d["requirements"][k].pop(f) for f in (
-                "quiz_question", "quiz_options", "correct_option_index", "quiz_explanation")]), "SCHEMA_INVALID"),
         ("requirements as a list", variant(lambda d, k: d.update(requirements=list(d["requirements"].values()))),
          "SCHEMA_INVALID"),
         ("wrapper object", json.dumps({"onboarding_plan": json.loads(variant(lambda d, k: None))}), "SCHEMA_INVALID"),
-        ("only one requirement entry", variant(lambda d, k: d.update(requirements={k: d["requirements"][k]})),
-         "SCHEMA_INVALID"),
+        ("markdown-wrapped JSON", "```json\n" + variant(lambda d, k: None) + "\n```", "MALFORMED_JSON"),
+        ("malformed JSON", variant(lambda d, k: None)[:-7], "MALFORMED_JSON"),
     ]
 
 
@@ -723,7 +759,7 @@ def run_gate(employee: str, snapshot: str | None = None, db_verification: str | 
         prompt = check_prompt(report, frozen, runtime["version"])
         db_ok, db_sql = check_database(report, db_path, runtime["version"], prompt.template_hash,
                                        runtime["provider"], runtime["config"])
-        measure_request(report, prompt, runtime["provider"], runtime["config"])
+        measure_request(report, prompt, runtime["provider"], runtime["config"], frozen)
         if not fixture_path.exists():
             raise Blocked("F. fixture", f"known-good fixture not found: {fixture_path}")
         fixture_text = fixture_path.read_text(encoding="utf-8")
@@ -749,7 +785,7 @@ def run_gate(employee: str, snapshot: str | None = None, db_verification: str | 
     if not db_ok:
         return GateResult("DB_VERIFICATION_REQUIRED", "DB_VERIFICATION_REQUIRED", report.lines, report.warnings,
                           report.facts, db_sql)
-    return GateResult("READY_FOR_LIVE_GENERATION", "READY_FOR_LIVE_GENERATION", report.lines, report.warnings,
+    return GateResult("READY_FOR_ONE_CONTROLLED_LIVE_GENERATION", "READY_FOR_ONE_CONTROLLED_LIVE_GENERATION", report.lines, report.warnings,
                       report.facts, db_sql)
 
 
@@ -777,7 +813,7 @@ def main(argv: list[str] | None = None) -> int:
         print(result.db_sql)
     print()
     print(result.final_line)
-    return {"READY_FOR_LIVE_GENERATION": 0, "DB_VERIFICATION_REQUIRED": 2}.get(result.status, 1)
+    return {"READY_FOR_ONE_CONTROLLED_LIVE_GENERATION": 0, "DB_VERIFICATION_REQUIRED": 2}.get(result.status, 1)
 
 
 if __name__ == "__main__":

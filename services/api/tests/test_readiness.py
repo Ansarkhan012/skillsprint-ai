@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from app import generation_readiness as gate
-from app.generation_content import (CONTENT_V400, CONTENT_V401, CURRENT_CONTENT_VERSION, ContentResponse,
+from app.generation_content import (CONTENT_V400, CONTENT_V401, CONTENT_V410, CURRENT_CONTENT_VERSION, ContentResponse,
                                     RequirementContent, RequirementContentV400, assemble_plan, requirement_keys)
 from app.generation_context import input_hash
 from app.generation_models import GenerationInputSnapshot, PreflightResult
@@ -30,11 +30,15 @@ from test_contract_v31 import COMPACT_CAPS
 FIXTURES = Path(__file__).parent / "fixtures"
 MIGRATIONS = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
 SNAPSHOT_FILE = FIXTURES / "phase4d_v31_frozen_snapshot_redacted.json"
+# 4.0.1 contract tests keep the 4.0.1 fixture; live-path/gate tests use the current 4.1.0 fixture.
 MODEL_FIXTURE = FIXTURES / "phase4d_v401_model_content_response.json"
+CURRENT_FIXTURE = FIXTURES / "phase4d_v410_model_content_response.json"
 EMPLOYEE = "aa02c897-14d8-4c3c-994a-c707550677ad"
 RUN = UUID("aaccc0b5-e109-432e-88ae-805acd35d96a")
 V400_HASH = "d0f338ed27b47e91207d3346fad2b0055f955960b258874804e9b17db8503b43"
 V401_HASH = "83c231d9c9647da559d57e6ece4680ef8f8902c6e38c1e484ae59888eb91b00a"
+V410_HASH = "f4edf5d50196fe8d4635a95cef1164bbd85215f31f90f58aa08390fed8c6d5fa"
+READY = "READY_FOR_ONE_CONTROLLED_LIVE_GENERATION"
 CANARY = "CANARY_POLICY_TEXT_do_not_log"
 
 
@@ -50,6 +54,10 @@ def snapshot():
 
 def model_fixture():
     return json.loads(MODEL_FIXTURE.read_text(encoding="utf-8"))
+
+
+def current_fixture():
+    return json.loads(CURRENT_FIXTURE.read_text(encoding="utf-8"))
 
 
 def assembled(content=None, frozen=None, request_id=RUN):
@@ -91,15 +99,16 @@ def test_401_accepts_valid_final_plans_that_400_wrongly_rejected():
 def test_hashes_all_versions_are_distinct_and_historical_ones_unchanged():
     assert content_template_hash(CONTENT_V400) == V400_HASH
     assert content_template_hash(CONTENT_V401) == V401_HASH
-    assert CURRENT_CONTENT_VERSION == CONTENT_V401 == "phase4d-content-only/4.0.1"
+    assert content_template_hash(CONTENT_V410) == V410_HASH
+    assert CURRENT_CONTENT_VERSION == CONTENT_V410 == "phase4d-content-only/4.1.0"
 
 
 # --- 7. structure the model cannot control -------------------------------------------------------
 
-def test_real_snapshot_request_is_4_0_1_content_only(monkeypatch):
+def test_real_snapshot_request_is_current_content_only(monkeypatch):
     monkeypatch.setenv("GENERATION_CONTENT_ONLY", "true")
     prompt = build_prompt(snapshot(), RUN)
-    assert (prompt.prompt_version, prompt.template_hash) == (CONTENT_V401, V401_HASH)
+    assert (prompt.prompt_version, prompt.template_hash) == (CONTENT_V410, V410_HASH)
     assert list(prompt.response_schema["properties"]["requirements"]["properties"]) == [f"R{i}" for i in range(1, 7)]
     assert not re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-", prompt.untrusted_data)
 
@@ -119,8 +128,9 @@ def test_model_cannot_supply_backend_owned_fields(field):
     target = data if field in ("stages", "generation_request_id") else data["requirements"]["R1"]
     target[field] = "anything"
     with pytest.raises(StructuralFailure) as caught:
-        assemble_content(json.dumps(data), snapshot(), RUN)
+        assemble_content(json.dumps(data), snapshot(), RUN, CONTENT_V401)
     assert caught.value.code == "SCHEMA_INVALID"
+    assert caught.value.detail["errors"][0]["type"] == "extra_forbidden"  # rejected for the field itself
 
 
 def test_requirement_mapping_sources_ids_and_dependencies_ignore_model_content():
@@ -153,7 +163,7 @@ def test_generated_ids_come_only_from_run_and_requirement():
 # --- 7. flag precedence and version drift ------------------------------------------------------
 
 @pytest.mark.parametrize("content_only,source_keys,expected", [
-    ("true", "false", CONTENT_V401), ("true", "true", CONTENT_V401), ("false", "true", SOURCE_KEYS_V31_PROMPT_VERSION),
+    ("true", "false", CONTENT_V410), ("true", "true", CONTENT_V410), ("false", "true", SOURCE_KEYS_V31_PROMPT_VERSION),
     ("false", "false", PROMPT_VERSION), ("", "true", SOURCE_KEYS_V31_PROMPT_VERSION)])
 def test_runtime_flag_precedence(monkeypatch, content_only, source_keys, expected):
     monkeypatch.setenv("GENERATION_CONTENT_ONLY", content_only)
@@ -168,7 +178,7 @@ def test_process_environment_overrides_dotenv(tmp_path, monkeypatch):
     monkeypatch.delenv("GENERATION_SOURCE_KEYS", raising=False)
     assert selected_prompt_version() == SOURCE_KEYS_V31_PROMPT_VERSION      # .env value
     monkeypatch.setenv("GENERATION_CONTENT_ONLY", "true")
-    assert selected_prompt_version() == CONTENT_V401                         # process env wins
+    assert selected_prompt_version() == CONTENT_V410                         # process env wins
 
 
 def test_reservation_and_execution_versions_cannot_drift(monkeypatch):
@@ -182,7 +192,7 @@ def test_reservation_and_execution_versions_cannot_drift(monkeypatch):
 
         async def generate(self, prompt, *, format_retry=False):
             self.prompts.append(prompt)
-            return ProviderResult(text=MODEL_FIXTURE.read_text(encoding="utf-8"), finish_reason="STOP")
+            return ProviderResult(text=CURRENT_FIXTURE.read_text(encoding="utf-8"), finish_reason="STOP")
 
     async def no_sleep(_s):
         return None
@@ -192,7 +202,7 @@ def test_reservation_and_execution_versions_cannot_drift(monkeypatch):
                                              prompt_version=reserved.prompt_version))
     assert result.status == "UNVERIFIED"
     assert (provider.prompts[0].prompt_version, provider.prompts[0].template_hash) == (
-        reserved.prompt_version, reserved.template_hash) == (CONTENT_V401, V401_HASH)
+        reserved.prompt_version, reserved.template_hash) == (CONTENT_V410, V410_HASH)
 
 
 # --- 2/7. structured, content-free diagnostics -----------------------------------------------------
@@ -243,7 +253,7 @@ def test_assembly_input_errors_are_logged_and_coded(caplog):
     bad = frozen.model_copy(update={"requirements": (frozen.requirements[0].model_copy(update={"evidence": ()}),
                                                      *frozen.requirements[1:])})
     with pytest.raises(StructuralFailure) as caught:
-        assemble_content(json.dumps(model_fixture()), bad, RUN)
+        assemble_content(json.dumps(model_fixture()), bad, RUN, CONTENT_V401)
     assert caught.value.code == "ASSEMBLY_INPUT_INVALID"
     assert any("code=ASSEMBLY_INPUT_INVALID" in m and "source_refs_out_of_bounds" in m for m in _warnings(caplog))
 
@@ -256,7 +266,7 @@ def test_content_and_pydantic_diagnostics_never_leak_model_or_document_text(capl
     data["requirements"]["R99"] = data["requirements"]["R3"]
     for text in (json.dumps(data), json.dumps({**model_fixture(), "notes": CANARY}), CANARY + "{"):
         with pytest.raises(StructuralFailure):
-            assemble_content(text, frozen, RUN)
+            assemble_content(text, frozen, RUN, CONTENT_V401)
     logged = "\n".join(_warnings(caplog))
     assert "generation_schema_invalid" in logged
     for secret in (CANARY, CANARY.upper(), *[e.excerpt[:25] for r in frozen.requirements for e in r.evidence]):
@@ -296,7 +306,7 @@ def test_structural_retry_is_reachable_only_within_the_budget_window(monkeypatch
 # --- 5/6. readiness gate -----------------------------------------------------------------------------
 
 def db_result(tmp_path, **overrides):
-    data = {"checked_prompt_version": CONTENT_V401, "checked_template_hash": V401_HASH, "checked_provider": "nararouter",
+    data = {"checked_prompt_version": CONTENT_V410, "checked_template_hash": V410_HASH, "checked_provider": "nararouter",
             "checked_model": "agnes-2.5-flash", "pair_accepted": True, "model_accepted": True,
             "max_timeout_seconds": 290, "max_output_tokens_upper": 65536, "projection_constraint_present": True,
             "diagnostics_table_present": True, "diagnostics_rpc_present": True, **overrides}
@@ -339,12 +349,12 @@ def no_network(monkeypatch):
 
 def test_gate_passes_the_real_snapshot_with_db_verification(backend_env, tmp_path, no_network):
     result = gate.run_gate(EMPLOYEE, str(SNAPSHOT_FILE), str(db_result(tmp_path)), backend_dir=str(backend_env))
-    assert result.final_line == "READY_FOR_LIVE_GENERATION", result.final_line
+    assert result.final_line == READY, result.final_line
     facts = result.facts
     frozen = snapshot()
     assert (facts["requirements"], facts["stages"], facts["dependencies"]) == (
         len(frozen.requirements), len(frozen.stage_set.items), len(frozen.dependencies)) == (6, 5, 8)
-    assert (facts["prompt_version"], facts["template_hash"]) == (CONTENT_V401, V401_HASH)
+    assert (facts["prompt_version"], facts["template_hash"]) == (CONTENT_V410, V410_HASH)
     assert facts["decision"] == "VERIFIED_WITH_WARNING" and facts["findings"] == 6
     assert facts["schema_depth"] == 3 and facts["request_bytes"] < 24_576
     text = "\n".join(result.lines)
@@ -355,14 +365,14 @@ def test_gate_passes_the_real_snapshot_with_db_verification(backend_env, tmp_pat
 def test_gate_requires_db_verification_and_never_assumes_it(backend_env, no_network):
     result = gate.run_gate(EMPLOYEE, str(SNAPSHOT_FILE), backend_dir=str(backend_env))
     assert result.status == "DB_VERIFICATION_REQUIRED" and result.final_line == "DB_VERIFICATION_REQUIRED"
-    assert V401_HASH in result.db_sql and "generation_runs_content_v401_projection_check" in result.db_sql
+    assert V410_HASH in result.db_sql and "generation_runs_content_v410_projection_check" in result.db_sql
     assert "pg_get_functiondef" in result.db_sql and not re.search(r"(?i)\b(insert|update|delete|alter)\b",
                                                                     result.db_sql)
 
 
 @pytest.mark.parametrize("override,reason", [
     ({"pair_accepted": False}, "pair_accepted"), ({"projection_constraint_present": False}, "projection constraint"),
-    ({"checked_template_hash": V400_HASH}, "checked_template_hash"), ({"max_timeout_seconds": 180}, "timeout bound"),
+    ({"checked_template_hash": V401_HASH}, "checked_template_hash"), ({"max_timeout_seconds": 180}, "timeout bound"),
     ({"model_accepted": False}, "model_accepted"), ({"diagnostics_rpc_present": False}, "diagnostics rpc"),
     ({"diagnostics_table_present": False}, "diagnostics table")])
 def test_gate_blocks_when_the_database_does_not_accept_the_contract(backend_env, tmp_path, no_network, override, reason):
@@ -378,14 +388,14 @@ def test_gate_refuses_a_non_current_prompt_version(backend_env, tmp_path, no_net
     env.write_text(env.read_text(encoding="utf-8").replace("GENERATION_CONTENT_ONLY=true", env_line), encoding="utf-8")
     result = gate.run_gate(EMPLOYEE, str(SNAPSHOT_FILE), str(db_result(tmp_path)), backend_dir=str(backend_env))
     assert result.final_line.startswith("BLOCKED: A. runtime configuration")
-    assert expected in result.final_line and CONTENT_V401 in result.final_line
+    assert expected in result.final_line and CONTENT_V410 in result.final_line
 
 
 def test_gate_blocks_wrong_employee_missing_config_and_bad_fixture(backend_env, tmp_path, no_network):
     wrong = gate.run_gate("00000000-0000-0000-0000-000000000001", str(SNAPSHOT_FILE), backend_dir=str(backend_env))
     assert wrong.final_line.startswith("BLOCKED: B. snapshot")
     fixture = tmp_path / "fixture.json"
-    data = model_fixture()
+    data = current_fixture()
     data["requirements"].pop("R6")
     fixture.write_text(json.dumps(data), encoding="utf-8")
     mismatched = gate.run_gate(EMPLOYEE, str(SNAPSHOT_FILE), fixture=str(fixture), backend_dir=str(backend_env))
@@ -405,11 +415,11 @@ def test_gate_without_snapshot_needs_an_operator_token(backend_env, no_network, 
 
 def test_gate_adversarial_fixtures_fail_at_the_expected_boundary():
     frozen = snapshot()
-    variants = gate.adversarial_variants(model_fixture())
-    assert len(variants) >= 11
+    variants = gate.adversarial_variants(current_fixture())
+    assert len(variants) >= 20
     for name, text, expected in variants:
         with pytest.raises(StructuralFailure) as caught:
-            assemble_content(text, frozen, RUN)
+            assemble_content(text, frozen, RUN, CONTENT_V410)
         assert caught.value.code == expected, name
 
 
@@ -417,7 +427,7 @@ def test_gate_cli_prints_a_single_final_status_and_exit_code(backend_env, tmp_pa
     code = gate.main(["--employee", EMPLOYEE, "--snapshot", str(SNAPSHOT_FILE),
                       "--db-verification", str(db_result(tmp_path)), "--backend-dir", str(backend_env)])
     out = capsys.readouterr().out.strip().splitlines()
-    assert code == 0 and out[-1] == "READY_FOR_LIVE_GENERATION"
+    assert code == 0 and out[-1] == READY
     code = gate.main(["--employee", EMPLOYEE, "--snapshot", str(SNAPSHOT_FILE), "--backend-dir", str(backend_env)])
     assert code == 2 and capsys.readouterr().out.strip().splitlines()[-1] == "DB_VERIFICATION_REQUIRED"
 
