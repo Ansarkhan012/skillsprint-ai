@@ -36,7 +36,7 @@ import httpx
 from dotenv import dotenv_values
 
 from .generation_content import (CONTENT_PROMPT_VERSIONS, CONTENT_RESPONSE_MODELS, CONTENT_V400, CONTENT_V401,
-                                 CONTENT_V410, CURRENT_CONTENT_VERSION,
+                                 CONTENT_V410, CONTENT_V411, CURRENT_CONTENT_VERSION, MINIMAL_CONTENT_VERSIONS,
                                  module_layout, requirement_keys, source_refs)
 from .generation_context import input_hash
 from .generation_models import GenerationInputSnapshot, PreflightResult
@@ -57,7 +57,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "phase4d_v410_model_content_response.json"
 # Deterministic dry-run request id; never reserved in the database.
 DRY_RUN_ID = uuid5(NAMESPACE_URL, "skillsprint-ai/generation-readiness/dry-run")
-PROJECTION_CONSTRAINTS = {CONTENT_V410: "generation_runs_content_v410_projection_check",
+PROJECTION_CONSTRAINTS = {CONTENT_V411: "generation_runs_content_v411_projection_check",
+                          CONTENT_V410: "generation_runs_content_v410_projection_check",
                           CONTENT_V400: "generation_runs_content_v4_projection_check",
                           CONTENT_V401: "generation_runs_content_v401_projection_check"}
 ALLOWED_INPUT_WARNINGS = {("TIMING_UNRESOLVED", "WARNING", "input.timing")}
@@ -391,7 +392,7 @@ def check_prompt(report: _Report, snapshot: GenerationInputSnapshot, version: st
         delegated.append("<uuid in model input>")
     if delegated:
         raise Blocked("C. prompt identity", f"backend-owned fields delegated to the model: {', '.join(delegated)}")
-    if version == CONTENT_V410:
+    if version in MINIMAL_CONTENT_VERSIONS:
         model_schema = _strict_schema(_compact_schema(CONTENT_RESPONSE_MODELS[version].model_json_schema()))
         if (schema != content_response_schema(expected_keys, None, version=version)
                 or schema.get("$defs") != model_schema.get("$defs")
@@ -400,6 +401,17 @@ def check_prompt(report: _Report, snapshot: GenerationInputSnapshot, version: st
                 or schema.get("required") != model_schema.get("required")):
             raise Blocked("C. prompt identity", "provider schema differs from the Pydantic content model")
         report.item("provider schema == Pydantic model", "identical (fields, required, bounds, additionalProperties)")
+    if version == CONTENT_V411:
+        embedded = re.search(r"\nresponse_json_schema=(.*)$", executed.rules, re.S)
+        keys_line = re.search(r"\nrequired_requirement_keys=([^\n]*)\n", executed.rules)
+        if embedded is None or keys_line is None:
+            raise Blocked("C. prompt identity", "4.1.1 prompt does not carry the required keys and response schema")
+        if json.loads(embedded.group(1)) != schema or json.loads(embedded.group(1)) != provider_schema_for(executed):
+            raise Blocked("C. prompt identity", "schema in the prompt differs from the response_format schema")
+        if [key.strip() for key in keys_line.group(1).split(",")] != expected_keys:
+            raise Blocked("C. prompt identity", "required keys in the prompt differ from the frozen requirements")
+        report.item("prompt-embedded schema", "== response_format schema == Pydantic model schema")
+        report.item("required keys in prompt", keys_line.group(1))
     report.item("model-generated mechanical fields", "none (no ids, stages, requirement mappings, sources, "
                                                      "dependencies, identity, request id, mandatory/priority)")
     report.facts.update(template_hash=executed.template_hash, projection_hash=executed.projection_hash)
@@ -512,8 +524,10 @@ def _request_bytes(prompt, provider: str, config) -> int:
 
 
 def measure_request(report: _Report, prompt, provider: str, config, snapshot=None) -> None:
-    if snapshot is not None and prompt.prompt_version == CONTENT_V410:
+    if snapshot is not None and prompt.prompt_version in MINIMAL_CONTENT_VERSIONS:
         _COMPARISON["v401_request_bytes"] = _request_bytes(build_prompt(snapshot, DRY_RUN_ID, version=CONTENT_V401),
+                                                           provider, config)
+        _COMPARISON["v410_request_bytes"] = _request_bytes(build_prompt(snapshot, DRY_RUN_ID, version=CONTENT_V410),
                                                            provider, config)
     report.section("E. Exact provider request (built, never sent)")
     if provider == "nararouter":
@@ -557,13 +571,22 @@ def measure_request(report: _Report, prompt, provider: str, config, snapshot=Non
         report.warn(f"input is large (~{total // 4} tokens)")
     if depth > 4:
         report.warn(f"response schema nesting depth {depth} exceeds the content-only design (3)")
-    if prompt.prompt_version == CONTENT_V410:
+    if prompt.prompt_version in MINIMAL_CONTENT_VERSIONS:
         previous = build_prompt_for_comparison(prompt)
         if previous is not None:
             ratio = total / previous
             report.item("vs 4.0.1 request bytes", f"{total} vs {previous} ({100 * (1 - ratio):.0f}% smaller)")
-            if ratio > 0.85:
+            if prompt.prompt_version == CONTENT_V410 and ratio > 0.85:
                 raise Blocked("E. request", f"4.1.0 request is not materially smaller than 4.0.1 ({total} vs {previous})")
+            if ratio >= 1:
+                raise Blocked("E. request", f"request is not smaller than 4.0.1 ({total} vs {previous})")
+        base = _COMPARISON.get("v410_request_bytes")
+        if prompt.prompt_version == CONTENT_V411 and base is not None:
+            growth, allowed = total - base, schema_bytes + 1024  # embedded schema + static rules text
+            report.item("vs 4.1.0 request bytes", f"{total} vs {base} (+{growth}; allowed +{allowed}: "
+                                                  f"the embedded schema and rules only)")
+            if growth > allowed:
+                raise Blocked("E. request", f"4.1.1 grew by {growth} bytes over 4.1.0 (allowed {allowed})")
     report.facts.update(request_bytes=total, schema_bytes=schema_bytes, input_tokens=total // 4,
                         schema_properties=properties, schema_depth=depth)
 

@@ -38,6 +38,9 @@ RUN = UUID("aaccc0b5-e109-432e-88ae-805acd35d96a")
 V400_HASH = "d0f338ed27b47e91207d3346fad2b0055f955960b258874804e9b17db8503b43"
 V401_HASH = "83c231d9c9647da559d57e6ece4680ef8f8902c6e38c1e484ae59888eb91b00a"
 V410_HASH = "f4edf5d50196fe8d4635a95cef1164bbd85215f31f90f58aa08390fed8c6d5fa"
+V411_HASH = "aba61f714140480ebcaee45f0d779c78f7165b51e487aecc902a97babd727d15"
+# The live contract; bump here when the current version changes.
+CURRENT, CURRENT_HASH = "phase4d-content-only/4.1.1", V411_HASH
 READY = "READY_FOR_ONE_CONTROLLED_LIVE_GENERATION"
 CANARY = "CANARY_POLICY_TEXT_do_not_log"
 
@@ -100,7 +103,8 @@ def test_hashes_all_versions_are_distinct_and_historical_ones_unchanged():
     assert content_template_hash(CONTENT_V400) == V400_HASH
     assert content_template_hash(CONTENT_V401) == V401_HASH
     assert content_template_hash(CONTENT_V410) == V410_HASH
-    assert CURRENT_CONTENT_VERSION == CONTENT_V410 == "phase4d-content-only/4.1.0"
+    assert content_template_hash(CURRENT) == CURRENT_HASH
+    assert CURRENT_CONTENT_VERSION == CURRENT == "phase4d-content-only/4.1.1"
 
 
 # --- 7. structure the model cannot control -------------------------------------------------------
@@ -108,7 +112,7 @@ def test_hashes_all_versions_are_distinct_and_historical_ones_unchanged():
 def test_real_snapshot_request_is_current_content_only(monkeypatch):
     monkeypatch.setenv("GENERATION_CONTENT_ONLY", "true")
     prompt = build_prompt(snapshot(), RUN)
-    assert (prompt.prompt_version, prompt.template_hash) == (CONTENT_V410, V410_HASH)
+    assert (prompt.prompt_version, prompt.template_hash) == (CURRENT, CURRENT_HASH)
     assert list(prompt.response_schema["properties"]["requirements"]["properties"]) == [f"R{i}" for i in range(1, 7)]
     assert not re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-", prompt.untrusted_data)
 
@@ -163,7 +167,7 @@ def test_generated_ids_come_only_from_run_and_requirement():
 # --- 7. flag precedence and version drift ------------------------------------------------------
 
 @pytest.mark.parametrize("content_only,source_keys,expected", [
-    ("true", "false", CONTENT_V410), ("true", "true", CONTENT_V410), ("false", "true", SOURCE_KEYS_V31_PROMPT_VERSION),
+    ("true", "false", CURRENT), ("true", "true", CURRENT), ("false", "true", SOURCE_KEYS_V31_PROMPT_VERSION),
     ("false", "false", PROMPT_VERSION), ("", "true", SOURCE_KEYS_V31_PROMPT_VERSION)])
 def test_runtime_flag_precedence(monkeypatch, content_only, source_keys, expected):
     monkeypatch.setenv("GENERATION_CONTENT_ONLY", content_only)
@@ -178,7 +182,7 @@ def test_process_environment_overrides_dotenv(tmp_path, monkeypatch):
     monkeypatch.delenv("GENERATION_SOURCE_KEYS", raising=False)
     assert selected_prompt_version() == SOURCE_KEYS_V31_PROMPT_VERSION      # .env value
     monkeypatch.setenv("GENERATION_CONTENT_ONLY", "true")
-    assert selected_prompt_version() == CONTENT_V410                         # process env wins
+    assert selected_prompt_version() == CURRENT                         # process env wins
 
 
 def test_reservation_and_execution_versions_cannot_drift(monkeypatch):
@@ -202,7 +206,7 @@ def test_reservation_and_execution_versions_cannot_drift(monkeypatch):
                                              prompt_version=reserved.prompt_version))
     assert result.status == "UNVERIFIED"
     assert (provider.prompts[0].prompt_version, provider.prompts[0].template_hash) == (
-        reserved.prompt_version, reserved.template_hash) == (CONTENT_V410, V410_HASH)
+        reserved.prompt_version, reserved.template_hash) == (CURRENT, CURRENT_HASH)
 
 
 # --- 2/7. structured, content-free diagnostics -----------------------------------------------------
@@ -306,7 +310,7 @@ def test_structural_retry_is_reachable_only_within_the_budget_window(monkeypatch
 # --- 5/6. readiness gate -----------------------------------------------------------------------------
 
 def db_result(tmp_path, **overrides):
-    data = {"checked_prompt_version": CONTENT_V410, "checked_template_hash": V410_HASH, "checked_provider": "nararouter",
+    data = {"checked_prompt_version": CURRENT, "checked_template_hash": CURRENT_HASH, "checked_provider": "nararouter",
             "checked_model": "agnes-2.5-flash", "pair_accepted": True, "model_accepted": True,
             "max_timeout_seconds": 290, "max_output_tokens_upper": 65536, "projection_constraint_present": True,
             "diagnostics_table_present": True, "diagnostics_rpc_present": True,
@@ -356,7 +360,7 @@ def test_gate_passes_the_real_snapshot_with_db_verification(backend_env, tmp_pat
     frozen = snapshot()
     assert (facts["requirements"], facts["stages"], facts["dependencies"]) == (
         len(frozen.requirements), len(frozen.stage_set.items), len(frozen.dependencies)) == (6, 5, 8)
-    assert (facts["prompt_version"], facts["template_hash"]) == (CONTENT_V410, V410_HASH)
+    assert (facts["prompt_version"], facts["template_hash"]) == (CURRENT, CURRENT_HASH)
     assert facts["decision"] == "VERIFIED_WITH_WARNING" and facts["findings"] == 6
     assert facts["schema_depth"] == 3 and facts["request_bytes"] < 24_576
     text = "\n".join(result.lines)
@@ -367,7 +371,7 @@ def test_gate_passes_the_real_snapshot_with_db_verification(backend_env, tmp_pat
 def test_gate_requires_db_verification_and_never_assumes_it(backend_env, no_network):
     result = gate.run_gate(EMPLOYEE, str(SNAPSHOT_FILE), backend_dir=str(backend_env))
     assert result.status == "DB_VERIFICATION_REQUIRED" and result.final_line == "DB_VERIFICATION_REQUIRED"
-    assert V410_HASH in result.db_sql and "generation_runs_content_v410_projection_check" in result.db_sql
+    assert CURRENT_HASH in result.db_sql and "generation_runs_content_v411_projection_check" in result.db_sql
     assert "pg_get_functiondef" in result.db_sql and not re.search(r"(?i)\b(insert|update|delete|alter)\b",
                                                                     result.db_sql)
 
@@ -391,7 +395,7 @@ def test_gate_refuses_a_non_current_prompt_version(backend_env, tmp_path, no_net
     env.write_text(env.read_text(encoding="utf-8").replace("GENERATION_CONTENT_ONLY=true", env_line), encoding="utf-8")
     result = gate.run_gate(EMPLOYEE, str(SNAPSHOT_FILE), str(db_result(tmp_path)), backend_dir=str(backend_env))
     assert result.final_line.startswith("BLOCKED: A. runtime configuration")
-    assert expected in result.final_line and CONTENT_V410 in result.final_line
+    assert expected in result.final_line and CURRENT in result.final_line
 
 
 def test_gate_blocks_wrong_employee_missing_config_and_bad_fixture(backend_env, tmp_path, no_network):
