@@ -1,0 +1,763 @@
+{
+  "schema_version": "onboarding-plan/1.0.0",
+  "generation_request_id": "aaccc0b5-e109-432e-88ae-805acd35d96a",
+  "employee_context": {
+    "employee_id": "aa02c897-14d8-4c3c-994a-c707550677ad",
+    "role_id": "95c3269b-a4b1-4232-b9e4-da6caac6117c",
+    "department_id": "3e884d18-84ea-49cf-9e19-61da967bca8b",
+    "experience_level": "BEGINNER",
+    "location_code": null,
+    "joining_date": "2026-09-25"
+  },
+  "plan": {
+    "title": "Phase4d engineer onboarding",
+    "summary": "Approved onboarding for 6 role requirements across 5 stages.",
+    "stages": [
+      {
+        "stage_id": "56e58057-c8e6-40ee-833f-8b4fbaea8fa2",
+        "label": "Orientation",
+        "sequence": 1,
+        "target_start_day": 0,
+        "target_end_day": 1,
+        "modules": []
+      },
+      {
+        "stage_id": "787ce05d-57f4-4521-8478-a92a3a23e569",
+        "label": "Policies & Compliance",
+        "sequence": 2,
+        "target_start_day": 1,
+        "target_end_day": 3,
+        "modules": [
+          {
+            "requirement_ids": [
+              "68feb837-2203-4521-bc12-d34deb014da5"
+            ],
+            "source_refs": [
+              "S1",
+              "S3",
+              "S4",
+              "S7"
+            ],
+            "module_id": "eb4de4d1-8419-58eb-8b01-7b7f956a3aed",
+            "title": "P4d security awareness",
+            "purpose": "Complete p4d security awareness within 2 days of the employee's joining date as required for this role.",
+            "category": "Must Complete",
+            "mandatory": true,
+            "priority": "MEDIUM",
+            "difficulty": "BEGINNER",
+            "estimated_minutes": 45,
+            "prerequisite_module_ids": [],
+            "learning_objectives": [
+              {
+                "requirement_ids": [
+                  "68feb837-2203-4521-bc12-d34deb014da5"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S7"
+                ],
+                "objective_id": "9a00a756-8c18-5897-9a84-59b04ba9cdcf",
+                "statement": "Explain what p4d security awareness requires and when it is due."
+              }
+            ],
+            "key_concepts": [],
+            "activities": [],
+            "scenarios": [],
+            "assessments": [],
+            "completion_criteria": [],
+            "checklist_items": [
+              {
+                "requirement_ids": [
+                  "68feb837-2203-4521-bc12-d34deb014da5"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S7"
+                ],
+                "checklist_item_id": "1c5586a0-a43b-5093-9013-f4ece766a5ac",
+                "activity": "Complete p4d security awareness within 2 days of the employee's joining date.",
+                "required": true,
+                "due_stage_id": "787ce05d-57f4-4521-8478-a92a3a23e569",
+                "responsible_role": "Employee"
+              }
+            ],
+            "tasks": [
+              {
+                "requirement_ids": [
+                  "68feb837-2203-4521-bc12-d34deb014da5"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S7"
+                ],
+                "task_id": "87124412-e85e-591a-ba2c-afadc9142a59",
+                "description": "Carry out p4d security awareness using the approved procedure.",
+                "expected_outcome": "P4d security awareness is completed and recorded.",
+                "completion_criteria": [
+                  "P4d security awareness completion is recorded"
+                ],
+                "difficulty": "BEGINNER",
+                "due_stage_id": "787ce05d-57f4-4521-8478-a92a3a23e569"
+              }
+            ],
+            "quizzes": [
+              {
+                "requirement_ids": [
+                  "68feb837-2203-4521-bc12-d34deb014da5"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S7"
+                ],
+                "quiz_id": "8d551324-26ab-5f13-b204-b4e532c92a7d",
+                "question_type": "SINGLE_CHOICE",
+                "question": "When must p4d security awareness be completed?",
+                "options": [
+                  {
+                    "option_id": "cb110555-c420-5ce4-87df-004318e21f7e",
+                    "text": "Within 2 days of the employee's joining date"
+                  },
+                  {
+                    "option_id": "c605cd63-3cb5-5bcc-a969-541dcd03feda",
+                    "text": "Only if a manager asks"
+                  },
+                  {
+                    "option_id": "6b6fceaa-45f4-58a7-a400-85f487a973f1",
+                    "text": "It is optional"
+                  }
+                ],
+                "correct_answer_ids": [
+                  "cb110555-c420-5ce4-87df-004318e21f7e"
+                ],
+                "explanation": "The approved requirement sets this timing.",
+                "difficulty": "BEGINNER"
+              }
+            ]
+          },
+          {
+            "requirement_ids": [
+              "6b559f5d-6083-454a-b04a-91de1d733311"
+            ],
+            "source_refs": [
+              "S1",
+              "S3",
+              "S4",
+              "S8"
+            ],
+            "module_id": "15188e51-21cd-52ef-8676-78ad1b89ebbc",
+            "title": "P4d policy ack",
+            "purpose": "Complete p4d policy ack within 1 day of the employee's joining date as required for this role.",
+            "category": "Must Acknowledge",
+            "mandatory": true,
+            "priority": "MEDIUM",
+            "difficulty": "BEGINNER",
+            "estimated_minutes": 45,
+            "prerequisite_module_ids": [],
+            "learning_objectives": [
+              {
+                "requirement_ids": [
+                  "6b559f5d-6083-454a-b04a-91de1d733311"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S8"
+                ],
+                "objective_id": "b5bde6ae-cc45-5571-8867-24f3992e1835",
+                "statement": "Explain what p4d policy ack requires and when it is due."
+              }
+            ],
+            "key_concepts": [],
+            "activities": [],
+            "scenarios": [],
+            "assessments": [],
+            "completion_criteria": [],
+            "checklist_items": [
+              {
+                "requirement_ids": [
+                  "6b559f5d-6083-454a-b04a-91de1d733311"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S8"
+                ],
+                "checklist_item_id": "f262df33-485b-5ab4-8c3d-43d452c1e693",
+                "activity": "Complete p4d policy ack within 1 day of the employee's joining date.",
+                "required": true,
+                "due_stage_id": "787ce05d-57f4-4521-8478-a92a3a23e569",
+                "responsible_role": "Employee"
+              }
+            ],
+            "tasks": [
+              {
+                "requirement_ids": [
+                  "6b559f5d-6083-454a-b04a-91de1d733311"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S8"
+                ],
+                "task_id": "169637af-909b-5d6c-9139-f0be180dd06b",
+                "description": "Carry out p4d policy ack using the approved procedure.",
+                "expected_outcome": "P4d policy ack is completed and recorded.",
+                "completion_criteria": [
+                  "P4d policy ack completion is recorded"
+                ],
+                "difficulty": "BEGINNER",
+                "due_stage_id": "787ce05d-57f4-4521-8478-a92a3a23e569"
+              }
+            ],
+            "quizzes": [
+              {
+                "requirement_ids": [
+                  "6b559f5d-6083-454a-b04a-91de1d733311"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S8"
+                ],
+                "quiz_id": "ef08c173-947d-54f6-ae62-742a5036c454",
+                "question_type": "SINGLE_CHOICE",
+                "question": "When must p4d policy ack be completed?",
+                "options": [
+                  {
+                    "option_id": "82559806-7f57-56b0-afd3-dba3d4387aa1",
+                    "text": "Within 1 day of the employee's joining date"
+                  },
+                  {
+                    "option_id": "7b925676-9d97-564c-8692-717a10b35458",
+                    "text": "Only if a manager asks"
+                  },
+                  {
+                    "option_id": "0cd2b9cc-3f0f-5567-ad3f-204878a195e8",
+                    "text": "It is optional"
+                  }
+                ],
+                "correct_answer_ids": [
+                  "82559806-7f57-56b0-afd3-dba3d4387aa1"
+                ],
+                "explanation": "The approved requirement sets this timing.",
+                "difficulty": "BEGINNER"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "stage_id": "e606ab54-30fd-439b-ad00-d3d9c0975530",
+        "label": "Role-Specific Training",
+        "sequence": 3,
+        "target_start_day": 2,
+        "target_end_day": 5,
+        "modules": [
+          {
+            "requirement_ids": [
+              "2bf4e41b-af7f-4997-9155-a519fc5d2e16"
+            ],
+            "source_refs": [
+              "S1",
+              "S2",
+              "S3",
+              "S4"
+            ],
+            "module_id": "05f65c2d-22d8-57ed-a4cf-0f2a0b03c3c6",
+            "title": "P4d workstation sandbox",
+            "purpose": "Complete p4d workstation sandbox within 2 days of the employee's joining date as required for this role.",
+            "category": "Must Complete",
+            "mandatory": true,
+            "priority": "MEDIUM",
+            "difficulty": "BEGINNER",
+            "estimated_minutes": 45,
+            "prerequisite_module_ids": [],
+            "learning_objectives": [
+              {
+                "requirement_ids": [
+                  "2bf4e41b-af7f-4997-9155-a519fc5d2e16"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S2",
+                  "S3",
+                  "S4"
+                ],
+                "objective_id": "c56e0dad-18e3-5e0c-8baa-aec63fc7644a",
+                "statement": "Explain what p4d workstation sandbox requires and when it is due."
+              }
+            ],
+            "key_concepts": [],
+            "activities": [],
+            "scenarios": [],
+            "assessments": [],
+            "completion_criteria": [],
+            "checklist_items": [
+              {
+                "requirement_ids": [
+                  "2bf4e41b-af7f-4997-9155-a519fc5d2e16"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S2",
+                  "S3",
+                  "S4"
+                ],
+                "checklist_item_id": "694a8e83-4d34-55ec-95d0-8ba7a7940915",
+                "activity": "Complete p4d workstation sandbox within 2 days of the employee's joining date.",
+                "required": true,
+                "due_stage_id": "e606ab54-30fd-439b-ad00-d3d9c0975530",
+                "responsible_role": "Employee"
+              }
+            ],
+            "tasks": [
+              {
+                "requirement_ids": [
+                  "2bf4e41b-af7f-4997-9155-a519fc5d2e16"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S2",
+                  "S3",
+                  "S4"
+                ],
+                "task_id": "b5d8bcb2-3791-5b1d-9839-900f3733ef48",
+                "description": "Carry out p4d workstation sandbox using the approved procedure.",
+                "expected_outcome": "P4d workstation sandbox is completed and recorded.",
+                "completion_criteria": [
+                  "P4d workstation sandbox completion is recorded"
+                ],
+                "difficulty": "BEGINNER",
+                "due_stage_id": "e606ab54-30fd-439b-ad00-d3d9c0975530"
+              }
+            ],
+            "quizzes": [
+              {
+                "requirement_ids": [
+                  "2bf4e41b-af7f-4997-9155-a519fc5d2e16"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S2",
+                  "S3",
+                  "S4"
+                ],
+                "quiz_id": "3d916209-2929-5586-a3dc-0151abaf27e2",
+                "question_type": "SINGLE_CHOICE",
+                "question": "When must p4d workstation sandbox be completed?",
+                "options": [
+                  {
+                    "option_id": "64d411e9-5f4c-5010-89b3-037c1df34a17",
+                    "text": "Within 2 days of the employee's joining date"
+                  },
+                  {
+                    "option_id": "a99c42a4-c1ed-55e6-aa36-65d0dd78960f",
+                    "text": "Only if a manager asks"
+                  },
+                  {
+                    "option_id": "0b98147c-c377-5611-8333-da4c239d11f4",
+                    "text": "It is optional"
+                  }
+                ],
+                "correct_answer_ids": [
+                  "64d411e9-5f4c-5010-89b3-037c1df34a17"
+                ],
+                "explanation": "The approved requirement sets this timing.",
+                "difficulty": "BEGINNER"
+              }
+            ]
+          },
+          {
+            "requirement_ids": [
+              "5c3ee910-3649-4708-8a0c-373851e24255"
+            ],
+            "source_refs": [
+              "S1",
+              "S3",
+              "S4",
+              "S5"
+            ],
+            "module_id": "1483b06c-70d1-51b3-aa88-9e937d5dc7e7",
+            "title": "P4d secure coding",
+            "purpose": "Complete p4d secure coding within 5 days of the employee's joining date as required for this role.",
+            "category": "Must Complete",
+            "mandatory": true,
+            "priority": "MEDIUM",
+            "difficulty": "BEGINNER",
+            "estimated_minutes": 45,
+            "prerequisite_module_ids": [
+              "05f65c2d-22d8-57ed-a4cf-0f2a0b03c3c6",
+              "eb4de4d1-8419-58eb-8b01-7b7f956a3aed"
+            ],
+            "learning_objectives": [
+              {
+                "requirement_ids": [
+                  "5c3ee910-3649-4708-8a0c-373851e24255"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S5"
+                ],
+                "objective_id": "01c0f3a3-f0a2-5503-a6e1-e1609e015bd1",
+                "statement": "Explain what p4d secure coding requires and when it is due."
+              }
+            ],
+            "key_concepts": [],
+            "activities": [],
+            "scenarios": [],
+            "assessments": [],
+            "completion_criteria": [],
+            "checklist_items": [
+              {
+                "requirement_ids": [
+                  "5c3ee910-3649-4708-8a0c-373851e24255"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S5"
+                ],
+                "checklist_item_id": "011692b2-13bf-586c-bf35-8127f530bb67",
+                "activity": "Complete p4d secure coding within 5 days of the employee's joining date.",
+                "required": true,
+                "due_stage_id": "e606ab54-30fd-439b-ad00-d3d9c0975530",
+                "responsible_role": "Employee"
+              }
+            ],
+            "tasks": [
+              {
+                "requirement_ids": [
+                  "5c3ee910-3649-4708-8a0c-373851e24255"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S5"
+                ],
+                "task_id": "2e7e9b9f-f575-587b-97ad-0f318a2b8a61",
+                "description": "Carry out p4d secure coding using the approved procedure.",
+                "expected_outcome": "P4d secure coding is completed and recorded.",
+                "completion_criteria": [
+                  "P4d secure coding completion is recorded"
+                ],
+                "difficulty": "BEGINNER",
+                "due_stage_id": "e606ab54-30fd-439b-ad00-d3d9c0975530"
+              }
+            ],
+            "quizzes": [
+              {
+                "requirement_ids": [
+                  "5c3ee910-3649-4708-8a0c-373851e24255"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S5"
+                ],
+                "quiz_id": "db478701-8fd9-513e-a815-172ff3365adf",
+                "question_type": "SINGLE_CHOICE",
+                "question": "When must p4d secure coding be completed?",
+                "options": [
+                  {
+                    "option_id": "609803ec-3552-5bef-b95b-db3589d9bf7e",
+                    "text": "Within 5 days of the employee's joining date"
+                  },
+                  {
+                    "option_id": "d6b093b8-a53a-5597-8638-c92bbe8c5c6d",
+                    "text": "Only if a manager asks"
+                  },
+                  {
+                    "option_id": "c53f305e-6e9d-5194-ba53-568e416bc23f",
+                    "text": "It is optional"
+                  }
+                ],
+                "correct_answer_ids": [
+                  "609803ec-3552-5bef-b95b-db3589d9bf7e"
+                ],
+                "explanation": "The approved requirement sets this timing.",
+                "difficulty": "BEGINNER"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "stage_id": "9c99b967-1247-4efd-a4bb-eb929a049725",
+        "label": "Practical Application",
+        "sequence": 4,
+        "target_start_day": 4,
+        "target_end_day": 7,
+        "modules": [
+          {
+            "requirement_ids": [
+              "6396606c-3c3a-4239-8001-272cf6c8fe15"
+            ],
+            "source_refs": [
+              "S1",
+              "S3",
+              "S4",
+              "S6"
+            ],
+            "module_id": "9f19e988-b766-54df-9578-59968f8ddc78",
+            "title": "P4d repo workflow",
+            "purpose": "Complete p4d repo workflow within 6 days of the employee's joining date as required for this role.",
+            "category": "Must Demonstrate",
+            "mandatory": true,
+            "priority": "MEDIUM",
+            "difficulty": "BEGINNER",
+            "estimated_minutes": 45,
+            "prerequisite_module_ids": [
+              "1483b06c-70d1-51b3-aa88-9e937d5dc7e7"
+            ],
+            "learning_objectives": [
+              {
+                "requirement_ids": [
+                  "6396606c-3c3a-4239-8001-272cf6c8fe15"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S6"
+                ],
+                "objective_id": "be7482a8-a88b-5be2-a60f-9162c2afe38e",
+                "statement": "Explain what p4d repo workflow requires and when it is due."
+              }
+            ],
+            "key_concepts": [],
+            "activities": [],
+            "scenarios": [],
+            "assessments": [],
+            "completion_criteria": [],
+            "checklist_items": [
+              {
+                "requirement_ids": [
+                  "6396606c-3c3a-4239-8001-272cf6c8fe15"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S6"
+                ],
+                "checklist_item_id": "3febce21-0ef1-5a5e-ad5e-e4ef99abedb8",
+                "activity": "Complete p4d repo workflow within 6 days of the employee's joining date.",
+                "required": true,
+                "due_stage_id": "9c99b967-1247-4efd-a4bb-eb929a049725",
+                "responsible_role": "Employee"
+              }
+            ],
+            "tasks": [
+              {
+                "requirement_ids": [
+                  "6396606c-3c3a-4239-8001-272cf6c8fe15"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S6"
+                ],
+                "task_id": "b5116550-bed0-5973-95ed-65de297a5e42",
+                "description": "Carry out p4d repo workflow using the approved procedure.",
+                "expected_outcome": "P4d repo workflow is completed and recorded.",
+                "completion_criteria": [
+                  "P4d repo workflow completion is recorded"
+                ],
+                "difficulty": "BEGINNER",
+                "due_stage_id": "9c99b967-1247-4efd-a4bb-eb929a049725"
+              }
+            ],
+            "quizzes": [
+              {
+                "requirement_ids": [
+                  "6396606c-3c3a-4239-8001-272cf6c8fe15"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S6"
+                ],
+                "quiz_id": "95971167-e3d4-5d86-92e8-5ea539a85ff7",
+                "question_type": "SINGLE_CHOICE",
+                "question": "When must p4d repo workflow be completed?",
+                "options": [
+                  {
+                    "option_id": "3336bfc4-7988-5e89-8947-9663719ae50c",
+                    "text": "Within 6 days of the employee's joining date"
+                  },
+                  {
+                    "option_id": "8c30cc2d-e4e6-5093-9b86-cc101c9e297b",
+                    "text": "Only if a manager asks"
+                  },
+                  {
+                    "option_id": "6c5c3983-2f47-5975-8de4-45df5684596a",
+                    "text": "It is optional"
+                  }
+                ],
+                "correct_answer_ids": [
+                  "3336bfc4-7988-5e89-8947-9663719ae50c"
+                ],
+                "explanation": "The approved requirement sets this timing.",
+                "difficulty": "BEGINNER"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "stage_id": "e73e840c-84c7-4a01-8cca-82bcda3e4569",
+        "label": "Assessment & Completion",
+        "sequence": 5,
+        "target_start_day": 7,
+        "target_end_day": 7,
+        "modules": [
+          {
+            "requirement_ids": [
+              "b5305f51-7a11-4877-931a-5c17b095c1da"
+            ],
+            "source_refs": [
+              "S1",
+              "S3",
+              "S4",
+              "S9",
+              "S10"
+            ],
+            "module_id": "62a3bffc-4424-598c-a629-404dd6421ab2",
+            "title": "P4d final assessment",
+            "purpose": "Complete p4d final assessment within 7 days of the employee's joining date as required for this role.",
+            "category": "Must Complete",
+            "mandatory": true,
+            "priority": "MEDIUM",
+            "difficulty": "BEGINNER",
+            "estimated_minutes": 45,
+            "prerequisite_module_ids": [
+              "05f65c2d-22d8-57ed-a4cf-0f2a0b03c3c6",
+              "1483b06c-70d1-51b3-aa88-9e937d5dc7e7",
+              "9f19e988-b766-54df-9578-59968f8ddc78",
+              "eb4de4d1-8419-58eb-8b01-7b7f956a3aed",
+              "15188e51-21cd-52ef-8676-78ad1b89ebbc"
+            ],
+            "learning_objectives": [
+              {
+                "requirement_ids": [
+                  "b5305f51-7a11-4877-931a-5c17b095c1da"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S9",
+                  "S10"
+                ],
+                "objective_id": "3dfd59dc-9cea-530f-87d4-0008e9d02319",
+                "statement": "Explain what p4d final assessment requires and when it is due."
+              }
+            ],
+            "key_concepts": [],
+            "activities": [],
+            "scenarios": [],
+            "assessments": [],
+            "completion_criteria": [],
+            "checklist_items": [
+              {
+                "requirement_ids": [
+                  "b5305f51-7a11-4877-931a-5c17b095c1da"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S9",
+                  "S10"
+                ],
+                "checklist_item_id": "c5f804cb-7723-55d3-b58f-f363f0c292bb",
+                "activity": "Complete p4d final assessment within 7 days of the employee's joining date.",
+                "required": true,
+                "due_stage_id": "e73e840c-84c7-4a01-8cca-82bcda3e4569",
+                "responsible_role": "Employee"
+              }
+            ],
+            "tasks": [
+              {
+                "requirement_ids": [
+                  "b5305f51-7a11-4877-931a-5c17b095c1da"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S9",
+                  "S10"
+                ],
+                "task_id": "3ee71951-f111-572f-a1cc-256df832a2f0",
+                "description": "Carry out p4d final assessment using the approved procedure.",
+                "expected_outcome": "P4d final assessment is completed and recorded.",
+                "completion_criteria": [
+                  "P4d final assessment completion is recorded"
+                ],
+                "difficulty": "BEGINNER",
+                "due_stage_id": "e73e840c-84c7-4a01-8cca-82bcda3e4569"
+              }
+            ],
+            "quizzes": [
+              {
+                "requirement_ids": [
+                  "b5305f51-7a11-4877-931a-5c17b095c1da"
+                ],
+                "source_refs": [
+                  "S1",
+                  "S3",
+                  "S4",
+                  "S9",
+                  "S10"
+                ],
+                "quiz_id": "e42ce7c9-3de6-51e8-a1cf-5955fcec948b",
+                "question_type": "SINGLE_CHOICE",
+                "question": "When must p4d final assessment be completed?",
+                "options": [
+                  {
+                    "option_id": "1324a9c7-97bf-538c-9070-919da2c8bb54",
+                    "text": "Within 7 days of the employee's joining date"
+                  },
+                  {
+                    "option_id": "bba70bfe-5205-59b8-8385-8ba59031279f",
+                    "text": "Only if a manager asks"
+                  },
+                  {
+                    "option_id": "fdf4d710-e24b-5fec-80fd-b2074226ac6e",
+                    "text": "It is optional"
+                  }
+                ],
+                "correct_answer_ids": [
+                  "1324a9c7-97bf-538c-9070-919da2c8bb54"
+                ],
+                "explanation": "The approved requirement sets this timing.",
+                "difficulty": "BEGINNER"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "insufficient_information": []
+}
