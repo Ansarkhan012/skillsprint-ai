@@ -10,3 +10,6 @@ node_modules/
 
 # Local tooling and generated scratch artifacts
 tmp/
+
+# Frozen generation snapshots exported for offline analysis (contain policy text)
+/snapshot_*.json

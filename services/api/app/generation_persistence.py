@@ -72,7 +72,7 @@ class GenerationStore(GenerationRepository):
         await self.rpc(token, "record_generation_attempt", {
             "p_run": str(run_id), "p_type": item.attempt_type,
             "p_outcome": item.provider_outcome, "p_latency": item.latency_ms,
-            "p_usage": {}, "p_response_hash": item.response_hash,
+            "p_usage": dict(item.usage), "p_response_hash": item.response_hash,
             "p_response_size": item.response_size, "p_parse": item.parse_outcome,
             "p_error": item.error_code,
         })

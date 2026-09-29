@@ -12,6 +12,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from .generation_content import CONTENT_PROMPT_VERSION, ContentResponse, assemble_plan, requirement_keys
 from .generation_context import input_hash
 from .generation_models import GenerationInputSnapshot, PreflightResult
 from .generation_output import OnboardingPlan
@@ -37,7 +38,21 @@ _SAFE_FIELD_NAMES = frozenset({
     "evidence_type", "threshold", "requirement_ids", "source_refs", "document_version_id",
     "chunk_id", "locator", "insufficient_information", "request_path", "topic",
     "requirement_id", "reason_code", "detail",
+    # 4.0.0 content-only response
+    "plan_title", "plan_summary", "requirements", "module_title", "module_purpose", "objective",
+    "task_description", "task_expected_outcome", "task_completion_criteria", "checklist_activity",
+    "quiz_question", "quiz_options", "correct_option_index", "quiz_explanation",
 })
+# Backend-issued requirement keys (R1..Rn) in 4.0.0 content paths are safe to report.
+_REQUIREMENT_KEY = re.compile(r"R[0-9]{1,4}")
+
+
+def _safe_part(part) -> object:
+    if isinstance(part, int) and 0 <= part <= 100:
+        return part
+    if isinstance(part, str) and (part in _SAFE_FIELD_NAMES or _REQUIREMENT_KEY.fullmatch(part)):
+        return part
+    return "unknown_field"
 
 
 def safe_validation_diagnostics(error: ValidationError) -> tuple[dict[str, object], ...]:
@@ -46,9 +61,7 @@ def safe_validation_diagnostics(error: ValidationError) -> tuple[dict[str, objec
     for item in error.errors(include_url=False, include_context=False, include_input=False)[:5]:
         path = []
         for part in item.get("loc", ())[:8]:
-            path.append(part if isinstance(part, int) and 0 <= part <= 100
-                        else part if isinstance(part, str) and part in _SAFE_FIELD_NAMES
-                        else "unknown_field")
+            path.append(_safe_part(part))
         kind = item.get("type", "unknown")
         diagnostics.append({"loc": tuple(path), "type": kind if isinstance(kind, str)
                             and re.fullmatch(r"[a-z_]{1,64}", kind) else "unknown"})
@@ -68,9 +81,7 @@ _SAFE_MESSAGE_TYPES = frozenset({
 
 def _safe_path(parts) -> str:
     """Dotted allowlisted path; unknown names and out-of-range indexes are masked."""
-    return ".".join(str(part) if isinstance(part, int) and 0 <= part <= 100
-                    else part if isinstance(part, str) and part in _SAFE_FIELD_NAMES
-                    else "unknown_field" for part in list(parts)[:16])
+    return ".".join(str(_safe_part(part)) for part in list(parts)[:16])
 
 
 def _log_schema_invalid(error: ValidationError, request_id: UUID) -> None:
@@ -107,6 +118,18 @@ class AttemptTelemetry(BaseModel):
     response_size: int | None = None
     parse_outcome: Literal["SCHEMA_VALID", "SCHEMA_INVALID", "NOT_PARSED"]
     error_code: str | None = None
+    # Only the token counts the attempts RPC accepts; empty when the provider reports none.
+    usage: dict[str, int] = {}
+
+
+def usage_metadata(response) -> dict[str, int]:
+    """Provider usage mapped to the RPC's allowlist (prompt/output/total tokens); never text."""
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return {}
+    values = {"prompt_tokens": usage.prompt_tokens, "output_tokens": usage.completion_tokens,
+              "total_tokens": usage.total_tokens}
+    return {name: value for name, value in values.items() if isinstance(value, int) and value >= 0}
 
 
 class StructuralFailure(Exception):
@@ -214,6 +237,41 @@ def expand_source_keys(text: str, keys: dict[str, SourceKey], request_id: UUID |
                      request_id, len(details), min(len(details), 10))
         raise StructuralFailure("SCHEMA_INVALID", tuple(problems[:5]))
     return json.dumps(decoded, ensure_ascii=False)
+
+
+def assemble_content(text: str, snapshot: GenerationInputSnapshot, request_id: UUID) -> str:
+    """4.0.0: validate the model's prose-only response, then build the full plan in Python.
+
+    Missing, extra or duplicate requirement entries, blank text, a quiz without exactly three
+    distinct options or an index outside 0-2 fail as SCHEMA_INVALID (duplicate JSON keys as
+    MALFORMED_JSON); nothing is repaired. The assembled plan then goes through parse_plan.
+    """
+    if not text or not text.strip():
+        raise StructuralFailure("EMPTY_RESPONSE")
+    if len(text.encode("utf-8", errors="replace")) > 2_000_000:
+        raise StructuralFailure("RESPONSE_TOO_LARGE")
+    try:
+        decoded = json.loads(text, object_pairs_hook=_unique_pairs, parse_constant=_reject_constant)
+    except RecursionError:
+        raise StructuralFailure("MALFORMED_JSON") from None
+    except (ValueError, TypeError):
+        raise StructuralFailure("MALFORMED_JSON") from None
+    try:
+        content = ContentResponse.model_validate_json(json.dumps(decoded, ensure_ascii=False))
+    except ValidationError as exc:
+        _log_schema_invalid(exc, request_id)
+        raise StructuralFailure("SCHEMA_INVALID", safe_validation_diagnostics(exc)) from None
+    expected = set(requirement_keys(snapshot))
+    problems = [{"loc": ("requirements", key), "type": "missing_requirement_content"}
+                for key in sorted(expected - set(content.requirements), key=lambda key: int(key[1:]))]
+    problems += [{"loc": ("requirements", "unknown_field"), "type": "unknown_requirement_key"}
+                 for _ in set(content.requirements) - expected]
+    if problems:
+        _LOG.warning("generation_content_invalid run_id=%s diagnostics=%s", request_id,
+                     json.dumps([{"loc": ".".join(map(str, item["loc"])), "type": item["type"]}
+                                 for item in problems[:20]]))
+        raise StructuralFailure("SCHEMA_INVALID", tuple(problems[:5]))
+    return json.dumps(assemble_plan(content, snapshot, request_id), ensure_ascii=False)
 
 
 def parse_plan(text: str, request_id: UUID, snapshot: GenerationInputSnapshot) -> OnboardingPlan:
@@ -343,7 +401,12 @@ async def generate_unverified(
                 if response.finish_reason != "STOP":
                     raise StructuralFailure("TRUNCATED_RESPONSE" if response.finish_reason == "MAX_TOKENS"
                                             else "PROVIDER_RESPONSE_REJECTED")
-                text = expand_source_keys(response.text, keys, request_id) if keys is not None else response.text
+                if prompt.prompt_version == CONTENT_PROMPT_VERSION:
+                    text = assemble_content(response.text, snapshot, request_id)
+                elif keys is not None:
+                    text = expand_source_keys(response.text, keys, request_id)
+                else:
+                    text = response.text
                 plan = parse_plan(text, request_id, snapshot)
             except ProviderFailure as exc:
                 code = exc.code if exc.code in SAFE_PROVIDER_ERRORS else "PROVIDER_UNAVAILABLE"
@@ -380,7 +443,7 @@ async def generate_unverified(
                         latency_ms=min(int((perf_counter() - started) * 1000), 600000),
                         response_hash=sha256(response_bytes).hexdigest() if response_bytes is not None else None,
                         response_size=len(response_bytes) if response_bytes is not None else None, parse_outcome="SCHEMA_INVALID",
-                        error_code=exc.code))
+                        error_code=exc.code, usage=usage_metadata(response)))
                 if format_attempt == 0 and exc.code in {"EMPTY_RESPONSE", "MALFORMED_JSON", "SCHEMA_INVALID",
                                                        "TRUNCATED_RESPONSE", "RESPONSE_TOO_LARGE"} and budget_allows():
                     attempt_prompt = prompt.model_copy(update={"rules": prompt.rules + "\n" + retry_feedback(exc)})
@@ -396,7 +459,8 @@ async def generate_unverified(
                         attempt_type=attempt_type, provider_outcome="RESPONSE",
                         latency_ms=min(int((perf_counter() - started) * 1000), 600000),
                         response_hash=sha256(response.text.encode("utf-8")).hexdigest(),
-                        response_size=len(response.text.encode("utf-8")), parse_outcome="SCHEMA_VALID"))
+                        response_size=len(response.text.encode("utf-8")), parse_outcome="SCHEMA_VALID",
+                        usage=usage_metadata(response)))
                 return GenerationResult(status="UNVERIFIED", plan=plan, input_hash=preflight.input_hash,
                                         prompt_version=prompt.prompt_version, template_hash=prompt.template_hash,
                                         provider_calls=calls)

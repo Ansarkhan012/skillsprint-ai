@@ -1,0 +1,90 @@
+{
+  "plan_title": "Engineer onboarding: first week",
+  "plan_summary": "Six mandatory steps in the first seven days: policies, security awareness, sandbox setup, secure coding, repository workflow and a final assessment.",
+  "requirements": {
+    "R1": {
+      "module_title": "Workstation and sandbox setup",
+      "module_purpose": "Prepare an approved, sandboxed development workstation before any engineering work begins.",
+      "estimated_minutes": 90,
+      "objective": "Set up the approved workstation and sandbox environment and confirm it meets the required configuration.",
+      "task_description": "Install and configure the approved workstation image and sandbox environment, then verify access.",
+      "task_expected_outcome": "A working, approved sandbox environment is available for development.",
+      "task_completion_criteria": ["Sandbox environment is running", "Setup is confirmed with the onboarding lead"],
+      "checklist_activity": "Complete workstation and sandbox setup within 2 days of the joining date.",
+      "quiz_question": "By when must the workstation and sandbox setup be completed?",
+      "quiz_options": ["Within 2 days of the joining date", "Within 7 days of the joining date", "Only before the first release"],
+      "correct_option_index": 0,
+      "quiz_explanation": "The approved requirement sets the deadline at 2 days after the joining date."
+    },
+    "R2": {
+      "module_title": "Secure coding fundamentals",
+      "module_purpose": "Learn the secure coding practices required before contributing code.",
+      "estimated_minutes": 120,
+      "objective": "Apply the required secure coding practices when writing and reviewing code.",
+      "task_description": "Complete the secure coding training and apply its practices to a small sandbox change.",
+      "task_expected_outcome": "Secure coding training is complete and its practices are applied in the sandbox.",
+      "task_completion_criteria": ["Training completion is recorded", "Sandbox change follows the practices"],
+      "checklist_activity": "Complete secure coding training within 5 days of the joining date.",
+      "quiz_question": "What must be completed before secure coding training?",
+      "quiz_options": ["Nothing; it can be done first", "Workstation setup and security awareness", "The final assessment"],
+      "correct_option_index": 1,
+      "quiz_explanation": "Secure coding builds on the sandbox workstation and security awareness modules."
+    },
+    "R3": {
+      "module_title": "Repository workflow in practice",
+      "module_purpose": "Demonstrate the approved repository workflow on a real change.",
+      "estimated_minutes": 90,
+      "objective": "Demonstrate branching, review and merge steps using the approved repository workflow.",
+      "task_description": "Make a small change following the approved repository workflow from branch to reviewed merge.",
+      "task_expected_outcome": "A change is merged through the approved workflow with review evidence.",
+      "task_completion_criteria": ["Change reviewed through the approved workflow", "Merge evidence recorded"],
+      "checklist_activity": "Demonstrate the repository workflow within 6 days of the joining date.",
+      "quiz_question": "How is the repository workflow requirement satisfied?",
+      "quiz_options": ["By reading the guide only", "By demonstrating it on a reviewed change", "By a manager's verbal approval"],
+      "correct_option_index": 1,
+      "quiz_explanation": "This requirement must be demonstrated, not only read."
+    },
+    "R4": {
+      "module_title": "Security awareness",
+      "module_purpose": "Understand the security awareness expectations that apply from the first days.",
+      "estimated_minutes": 60,
+      "objective": "Explain the security awareness expectations and how to report a concern.",
+      "task_description": "Complete the security awareness training.",
+      "task_expected_outcome": "Security awareness training is complete and recorded.",
+      "task_completion_criteria": ["Training completion is recorded"],
+      "checklist_activity": "Complete security awareness training within 2 days of the joining date.",
+      "quiz_question": "By when must security awareness training be completed?",
+      "quiz_options": ["Within 30 days", "Within 2 days of the joining date", "Before the annual review"],
+      "correct_option_index": 1,
+      "quiz_explanation": "The approved requirement sets 2 days after the joining date."
+    },
+    "R5": {
+      "module_title": "Policy acknowledgement",
+      "module_purpose": "Read and acknowledge the required company policies on day one.",
+      "estimated_minutes": 30,
+      "objective": "Acknowledge the required policies and know where to find them.",
+      "task_description": "Read the required policies and record your acknowledgement.",
+      "task_expected_outcome": "Policy acknowledgement is recorded.",
+      "task_completion_criteria": ["Acknowledgement is recorded"],
+      "checklist_activity": "Acknowledge the required policies within 1 day of the joining date.",
+      "quiz_question": "What is required for the policy acknowledgement?",
+      "quiz_options": ["A recorded acknowledgement within 1 day of joining", "A verbal confirmation at any time", "Nothing until the first review"],
+      "correct_option_index": 0,
+      "quiz_explanation": "The acknowledgement must be recorded within 1 day of the joining date."
+    },
+    "R6": {
+      "module_title": "Final onboarding assessment",
+      "module_purpose": "Confirm readiness after completing all onboarding requirements.",
+      "estimated_minutes": 60,
+      "objective": "Demonstrate understanding of the completed onboarding requirements.",
+      "task_description": "Complete the final onboarding assessment after all other modules.",
+      "task_expected_outcome": "The final assessment is completed and recorded.",
+      "task_completion_criteria": ["Assessment result is recorded"],
+      "checklist_activity": "Complete the final assessment within 7 days of the joining date.",
+      "quiz_question": "When can the final assessment be taken?",
+      "quiz_options": ["On the first day", "After all other onboarding modules are complete", "Only after 30 days"],
+      "correct_option_index": 1,
+      "quiz_explanation": "The final assessment depends on every other onboarding requirement."
+    }
+  }
+}

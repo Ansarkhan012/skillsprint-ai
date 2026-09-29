@@ -9,7 +9,8 @@ import httpx
 from pydantic import ConfigDict, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .generation_prompt import FORMAT_RETRY_RULE, MAX_PROVIDER_REQUEST_BYTES, PromptPack, current_provider_schema
+from .generation_content import CONTENT_PROMPT_VERSION
+from .generation_prompt import FORMAT_RETRY_RULE, MAX_PROVIDER_REQUEST_BYTES, PromptPack, provider_schema_for
 from .generation_provider import (ProviderConfig, ProviderFailure, json_schema_response_format,
                                   ProviderResult, ProviderUsage, _bounded_retry_after, post_with_deadline)
 
@@ -33,6 +34,11 @@ OUTPUT_INSTRUCTIONS = (
     "Use concise strings and include every required onboarding-plan/1.0.0 field. "
     "Keep all applicable requirements and their source references traceable."
 )
+# 4.0.0: the backend owns structure and traceability; only the JSON-only instruction applies.
+CONTENT_OUTPUT_INSTRUCTIONS = (
+    "Return exactly one JSON object, with no markdown, code fences, commentary, or reasoning text. "
+    "Use concise strings."
+)
 
 
 class NaraRouterConfig(ProviderConfig):
@@ -40,6 +46,9 @@ class NaraRouterConfig(ProviderConfig):
     base_url: str = Field(repr=False)
     # OpenAI-compatible reasoning control; None omits the parameter entirely.
     reasoning_effort: Literal["none", "low", "medium", "high"] | None = None
+    # 4.0.0 content-only prompts only; historical versions keep reasoning_effort above.
+    # "none" is not allowed: it produced plans without modules under the old contract.
+    content_reasoning_effort: Literal["low", "medium", "high"] = "low"
 
     @field_validator("base_url")
     @classmethod
@@ -80,6 +89,8 @@ class NaraRouterEnvironment(BaseSettings):
     nararouter_temperature: float = 0.1
     # Opt-in. Live tests: "none" made free models fast but return plans with no modules.
     nararouter_reasoning_effort: str | None = None
+    # Blank/unset keeps "low" for 4.0.0 content prompts.
+    nararouter_content_reasoning_effort: str | None = None
 
     def adapter_config(self) -> NaraRouterConfig:
         if not self.nararouter_api_key or not self.nararouter_base_url or not self.nararouter_model:
@@ -90,7 +101,8 @@ class NaraRouterEnvironment(BaseSettings):
                 timeout_seconds=self.nararouter_timeout_seconds,
                 max_output_tokens=self.nararouter_max_output_tokens,
                 temperature=self.nararouter_temperature,
-                reasoning_effort=self.nararouter_reasoning_effort or None)
+                reasoning_effort=self.nararouter_reasoning_effort or None,
+                content_reasoning_effort=self.nararouter_content_reasoning_effort or "low")
         except ValueError:
             raise ProviderFailure("PROVIDER_CONFIGURATION_FAILED") from None
 
@@ -98,15 +110,17 @@ class NaraRouterEnvironment(BaseSettings):
 def nararouter_request_payload(prompt: PromptPack, config: NaraRouterConfig,
                               *, format_retry: bool = False) -> dict:
     """Chat-completions envelope; model entitlement must be discovered separately."""
-    system = prompt.system + "\n" + prompt.rules + "\n" + OUTPUT_INSTRUCTIONS
+    content = prompt.prompt_version == CONTENT_PROMPT_VERSION
+    system = prompt.system + "\n" + prompt.rules + "\n" + (CONTENT_OUTPUT_INSTRUCTIONS if content else OUTPUT_INSTRUCTIONS)
     if format_retry:
         system += "\n" + FORMAT_RETRY_RULE
+    effort = config.content_reasoning_effort if content else config.reasoning_effort
     return {"model": config.model,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": prompt.untrusted_data}],
             "response_format": {"type": "json_object"}, "stream": False,
             "temperature": config.temperature, "max_tokens": config.max_output_tokens,
-            **({"reasoning_effort": config.reasoning_effort} if config.reasoning_effort else {})}
+            **({"reasoning_effort": effort} if effort else {})}
 
 
 def _usage(value: object) -> ProviderUsage | None:
@@ -150,7 +164,7 @@ class NaraRouterProvider:
         if not prompt.within_budget or len(encoded) > MAX_PROVIDER_REQUEST_BYTES:
             raise ProviderFailure("GENERATION_PROJECTION_TOO_LARGE")
         encoded = httpx.Request("POST", url, json={
-            **payload, "response_format": json_schema_response_format(current_provider_schema(prompt.prompt_version))}).content
+            **payload, "response_format": json_schema_response_format(provider_schema_for(prompt))}).content
         started = perf_counter()
         response = await post_with_deadline(self.client, url, deadline_seconds=self.config.timeout_seconds,
             content=encoded, follow_redirects=False,
