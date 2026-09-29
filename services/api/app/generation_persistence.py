@@ -1,6 +1,11 @@
 """Phase 4C caller-JWT storage boundary. No service-role credential is used."""
 
+import json
 import logging
+import os
+import re
+from datetime import datetime, timezone
+from pathlib import Path
 from uuid import UUID
 
 import httpx
@@ -12,6 +17,46 @@ from .generation_service import AttemptTelemetry
 from .rrm_repository import RRMRepository
 
 _LOG = logging.getLogger(__name__)
+# Local, content-free record of every failed attempt's diagnostics (JSON lines). Relative paths
+# resolve against the backend's working directory; set GENERATION_DIAGNOSTICS_FILE to blank to disable.
+DEFAULT_DIAGNOSTICS_FILE = "logs/generation_diagnostics.jsonl"
+_SAFE_DB_CODE = re.compile(r"[A-Z0-9_]{1,40}")
+
+
+def diagnostics_file() -> Path | None:
+    value = os.environ.get("GENERATION_DIAGNOSTICS_FILE", DEFAULT_DIAGNOSTICS_FILE)
+    return Path(value) if value.strip() else None
+
+
+def _safe_error_code(response: httpx.Response) -> str | None:
+    """PostgREST/Postgres error code (e.g. PGRST202, 42501) or our GEN4_* code; never messages."""
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    if not isinstance(body, dict):
+        return None
+    for value in (body.get("message"), body.get("code")):
+        if isinstance(value, str) and _SAFE_DB_CODE.fullmatch(value) and (
+                value.startswith(("GEN4_", "PGRST")) or value.isdigit() or re.fullmatch(r"[0-9A-Z]{5}", value)):
+            return value
+    return None
+
+
+def write_local_diagnostics(run_id: UUID, attempt_no: int | None, item: AttemptTelemetry, outcome: dict) -> None:
+    """Append one content-free line; never raises (diagnostics must not break generation)."""
+    path = diagnostics_file()
+    if path is None:
+        return
+    record = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "run_id": str(run_id),
+              "attempt_no": attempt_no, "error_code": item.error_code, "response_size": item.response_size,
+              "usage": dict(item.usage), **outcome, "diagnostics": item.diagnostics}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+    except OSError as exc:
+        _LOG.warning("generation_local_diagnostics_not_written run_id=%s reason=%s", run_id, type(exc).__name__)
 
 
 SAFE_RPC_ERRORS = {
@@ -79,14 +124,32 @@ class GenerationStore(GenerationRepository):
             "p_response_size": item.response_size, "p_parse": item.parse_outcome,
             "p_error": item.error_code,
         })
-        if item.diagnostics and isinstance(attempt_no, int):
-            # Best effort and additive (migration 202609280010): a missing table or function must
-            # never fail a generation whose attempt is already recorded.
-            try:
-                await self.rpc(token, "record_generation_attempt_diagnostics",
-                               {"p_run": str(run_id), "p_attempt": attempt_no, "p_diagnostics": item.diagnostics})
-            except HTTPException:
-                _LOG.warning("generation_attempt_diagnostics_not_persisted run_id=%s attempt=%d", run_id, attempt_no)
+        if not item.diagnostics:
+            return
+        # Best effort and additive (migration 202609280010): a failed diagnostics write must never
+        # fail a generation whose attempt is already recorded. Every outcome is recorded locally
+        # (content-free) so the exact failure survives even if the database write fails.
+        outcome = {"db_persisted": False, "db_status": None, "db_code": None}
+        if not isinstance(attempt_no, int) or isinstance(attempt_no, bool):
+            outcome["db_code"] = "ATTEMPT_NUMBER_NOT_INTEGER:" + type(attempt_no).__name__
+        else:
+            outcome.update(await self._record_diagnostics(token, run_id, attempt_no, item.diagnostics))
+        if not outcome["db_persisted"]:
+            _LOG.warning("generation_attempt_diagnostics_not_persisted run_id=%s attempt=%s db_status=%s db_code=%s",
+                         run_id, attempt_no, outcome["db_status"], outcome["db_code"])
+        write_local_diagnostics(run_id, attempt_no if isinstance(attempt_no, int) else None, item, outcome)
+
+    async def _record_diagnostics(self, token: str, run_id: UUID, attempt_no: int, diagnostics: dict) -> dict:
+        """Write diagnostics; report the HTTP status and a safe error code instead of raising."""
+        try:
+            response = await self.rrm.http().post(
+                f"{self.rrm.url}/rest/v1/rpc/record_generation_attempt_diagnostics", headers=self.rrm.headers(token),
+                json={"p_run": str(run_id), "p_attempt": attempt_no, "p_diagnostics": diagnostics}, timeout=30)
+        except httpx.HTTPError as exc:
+            return {"db_persisted": False, "db_status": None, "db_code": "TRANSPORT_" + type(exc).__name__}
+        if response.is_success:
+            return {"db_persisted": True, "db_status": response.status_code, "db_code": None}
+        return {"db_persisted": False, "db_status": response.status_code, "db_code": _safe_error_code(response)}
 
     async def finish(self, token: str, run_id: UUID, postflight_hash: str | None,
                      plan: dict | None, content_hash: str | None, error: str | None) -> str:

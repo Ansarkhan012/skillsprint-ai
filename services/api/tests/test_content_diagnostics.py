@@ -252,11 +252,14 @@ class Capture(GenerationStore):
 
     async def rpc(self, token, name, payload):
         self.calls.append((name, payload))
-        if name == "record_generation_attempt":
-            return 1
+        return 1
+
+    async def _record_diagnostics(self, token, run_id, attempt_no, diagnostics):
+        self.calls.append(("record_generation_attempt_diagnostics",
+                           {"p_run": str(run_id), "p_attempt": attempt_no, "p_diagnostics": diagnostics}))
         if self.fail:
-            raise HTTPException(503, "GENERATION_DATA_UNAVAILABLE")
-        return None
+            return {"db_persisted": False, "db_status": 404, "db_code": "PGRST202"}
+        return {"db_persisted": True, "db_status": 204, "db_code": None}
 
 
 BASE = dict(attempt_type="INITIAL", provider_outcome="RESPONSE", latency_ms=110906, response_hash="9b" * 32,

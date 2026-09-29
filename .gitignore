@@ -14,3 +14,4 @@ tmp/
 # Frozen generation snapshots exported for offline analysis (contain policy text)
 /snapshot_*.json
 /db_readiness*.json
+/logs/

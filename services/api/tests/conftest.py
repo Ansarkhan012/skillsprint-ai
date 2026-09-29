@@ -17,3 +17,5 @@ for _name in ("GENERATION_MAX_OBJECTIVES_PER_MODULE", "GENERATION_MAX_TASKS_PER_
 # Short source keys are opt-in; tests default to today's 2.0.0 prompt regardless of .env.
 os.environ["GENERATION_SOURCE_KEYS"] = "false"
 os.environ["GENERATION_CONTENT_ONLY"] = "false"
+# Tests never write the local diagnostics file unless a test points it at a temp path.
+os.environ["GENERATION_DIAGNOSTICS_FILE"] = ""

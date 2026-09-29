@@ -166,6 +166,16 @@ def check_configuration(report: _Report, backend_dir: Path) -> dict:
     limits = GenerationLimits()
     for name in GenerationLimits.model_fields:
         report.item(name.upper(), f"{getattr(limits, name)}  [{_source(name.upper(), env_file)}]")
+    from .generation_persistence import diagnostics_file
+    sink = diagnostics_file()
+    if sink is None:
+        raise Blocked("A. runtime configuration", "GENERATION_DIAGNOSTICS_FILE is blank: a failed live attempt "
+                                                  "would leave no durable local diagnostic")
+    sink = sink if sink.is_absolute() else backend_dir / sink
+    existing = next(parent for parent in (sink, *sink.parents) if parent.exists())
+    if not os.access(existing if existing.is_dir() else existing.parent, os.W_OK):
+        raise Blocked("A. runtime configuration", f"local diagnostics file is not writable: {sink}")
+    report.item("local diagnostics file", f"{sink} (content-free JSON lines, written for every failed attempt)")
     window = structural_retry_window(config.timeout_seconds)
     report.item("structural retry window", f"{window:.1f} s (a format retry needs the first call to finish "
                                             f"within this time)")
@@ -417,7 +427,12 @@ select json_build_object(
   'projection_constraint_present', exists (select 1 from pg_constraint where conname = '{constraint}'),
   'diagnostics_table_present', to_regclass('public.generation_attempt_diagnostics') is not null,
   'diagnostics_rpc_present', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-                                     where n.nspname = 'public' and p.proname = 'record_generation_attempt_diagnostics')
+                                     where n.nspname = 'public' and p.proname = 'record_generation_attempt_diagnostics'),
+  'diagnostics_rpc_executable', coalesce((select has_function_privilege('authenticated', p.oid, 'execute')
+                                          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                                          where n.nspname = 'public'
+                                            and p.proname = 'record_generation_attempt_diagnostics'), false),
+  'postgrest_schema_reload_trigger_present', exists (select 1 from pg_event_trigger where evtname ilike 'pgrst%')
 ) as readiness
 from f;"""
 
@@ -460,6 +475,7 @@ def check_database(report: _Report, db_path: Path | None, version: str, template
         # A failed live call must leave persisted, safe diagnostics (migration 202609280010).
         "diagnostics table": result.get("diagnostics_table_present") is True,
         "diagnostics rpc": result.get("diagnostics_rpc_present") is True,
+        "diagnostics rpc executable": result.get("diagnostics_rpc_executable") is True,
     }
     failed = [name for name, ok in checks.items() if not ok]
     if failed:
@@ -467,6 +483,9 @@ def check_database(report: _Report, db_path: Path | None, version: str, template
                                      f"apply the pending migration and re-run the SQL")
     for name in checks:
         report.item(name, "ok")
+    if result.get("postgrest_schema_reload_trigger_present") is not True:
+        report.warn("no PostgREST schema-reload event trigger reported: after applying migrations run "
+                    "NOTIFY pgrst, 'reload schema'; so new RPCs are reachable")
     return True, sql
 
 
